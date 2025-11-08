@@ -16,9 +16,9 @@ print("Processing...")
 
 # User settings
 
-filename_baseline = '180109_3_15_RC_Baseline.csv'
-filename_controlled = '180109_3_15_RC_Control.csv'
-filename_controlled2 = '180109_3_15_RC_Control.csv'
+filename_baseline = '180407_1_15_xx_Baseline.parquet'
+filename_controlled = '180407_1_15_xx_Control.parquet'
+filename_controlled2 = '180407_1_15_xx_Control.parquet'
 WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
 
 
@@ -56,18 +56,6 @@ def collapse_to_composite(series, how="sum"):
 agg_controlled = os.path.join(WORKING_DIR, filename_controlled)
 agg_controlled2 = os.path.join(WORKING_DIR, filename_controlled2)
 agg_baseline = os.path.join(WORKING_DIR, filename_baseline)
-# df_controlled = pd.read_csv(agg_controlled, index_col=0, parse_dates=True)
-# df_baseline = pd.read_csv(agg_baseline, index_col=0, parse_dates=True)
-
-# # Aggregate by timestamp across all homes
-# df_controlled = df_controlled.groupby(df_controlled.index).agg({
-#     'Water Heating Electric Power (kW)': 'sum',        # total power across homes
-#     'Water Heating Control Temperature (C)': 'mean'    # average temp across homes
-# })
-# df_baseline = df_baseline.groupby(df_baseline.index).agg({
-#     'Water Heating Electric Power (kW)': 'sum',        # total power across homes
-#     'Water Heating Control Temperature (C)': 'mean'    # average temp across homes
-# })
 
 # -------------------------------
 # Aggregate and compute ET at each timestep
@@ -78,24 +66,58 @@ def calc_ET_instant(tempC, COP, Tset_F):
     tempF = 9/5 * tempC + 32
     return ET(tempF, COP, Tset_F) / 1000.0  # kWh
 
+# def process_dataset(path):
+#     # Load raw CSV
+#     df_raw = pd.read_parquet(path)
+
+#     # Compute instantaneous ET
+#     df_raw["ET (kWh)"] = calc_ET_instant(df_raw[Ttrue_col], COPconstant, 130)
+
+#     # Sum power and ET across all buildings at each timestep
+#     df_out = df_raw.groupby(df_raw.index).agg({
+#         'Water Heating Electric Power (kW)': 'sum',
+#         'ET (kWh)': 'sum'
+#     })
+
+#     # Add helper columns for time-of-day and date
+#     df_out["time_of_day"] = df_out.index.time
+#     df_out["date"] = df_out.index.date
+
+#     return df_out
+
 def process_dataset(path):
-    # Load raw CSV
-    df_raw = pd.read_csv(path, index_col=0, parse_dates=True)
+    """Load Parquet, ensure datetime index, compute ET, and aggregate."""
+    df_raw = pd.read_parquet(path)
+
+    # If the index is not datetime, try to find a timestamp column
+    if not isinstance(df_raw.index, pd.DatetimeIndex):
+        possible_time_cols = [c for c in df_raw.columns if "time" in c.lower() or "date" in c.lower()]
+        if len(possible_time_cols) == 0:
+            raise ValueError(
+                f"No datetime index or time column found in {os.path.basename(path)}. "
+                f"Columns available: {list(df_raw.columns)}"
+            )
+        time_col = possible_time_cols[0]
+        df_raw[time_col] = pd.to_datetime(df_raw[time_col], errors="coerce")
+        df_raw = df_raw.set_index(time_col)
+        if df_raw.index.isnull().any():
+            raise ValueError(f"Datetime conversion failed for column {time_col} in {os.path.basename(path)}")
 
     # Compute instantaneous ET
     df_raw["ET (kWh)"] = calc_ET_instant(df_raw[Ttrue_col], COPconstant, 130)
 
     # Sum power and ET across all buildings at each timestep
     df_out = df_raw.groupby(df_raw.index).agg({
-        'Water Heating Electric Power (kW)': 'sum',
+        power_col: 'sum',
         'ET (kWh)': 'sum'
     })
 
-    # Add helper columns for time-of-day and date
+    # Add helper columns
     df_out["time_of_day"] = df_out.index.time
     df_out["date"] = df_out.index.date
 
     return df_out
+
 
 # Process controlled and baseline datasets
 df_controlled = process_dataset(agg_controlled)
@@ -206,6 +228,12 @@ def get_time_range(base_date, key_prefix):
 #     start, end = get_time_range(ref_date, key)
 #     for ax in [ax_base, ax_control]:
 #         ax.axvspan(start, end, color=info['color'], alpha=0.2)
+
+    # Apply shading only to the controlled subplot
+    for key, info in periods.items():
+        start, end = get_time_range(ref_date, key)
+        ax_control.axvspan(start, end, color=info['color'], alpha=0.2)
+
 
 # -------------------------------
 # Y-limits (synchronized)

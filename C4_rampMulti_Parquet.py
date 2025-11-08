@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Sep 30 16:52:01 2025
+Created on Fri Nov  7 16:21:09 2025
 
 @author: danap
 """
-
 
 import os
 import shutil
@@ -15,16 +14,21 @@ from ochre.utils.schedule import ALL_SCHEDULE_NAMES
 import concurrent.futures
 import random
 import time
+# from ochre.cli import run_multiple_local
+import datetime
+
+
+print(datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z'))
+
 
 start_time = time.time()
 
-print(start_time)
 
 #########################################
 # USER SETTINGS
 #########################################
 
-filename = '180217_2_15_RCJ' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180407_1_15_xx' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -35,8 +39,8 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 2, 17, 0, 0)
-Duration = 3  # days
+Start = dt.datetime(2018, 4, 7, 0, 0)
+Duration = 2  # days
 t_res = 15  # minutes
 jitter_min = 5
 
@@ -139,7 +143,12 @@ def filter_schedules(home_path):
 
     df_sched = pd.read_csv(orig_sched_file)
     valid_schedule_names = set(ALL_SCHEDULE_NAMES.keys())
-    filtered_columns = [col for col in df_sched.columns if col in valid_schedule_names]
+
+    # Keep all HPWH custom columns too
+    hpwh_cols = ['M_LU_time','M_LU_duration','M_S_time','M_S_duration',
+                 'E_ALU_time','E_ALU_duration','E_S_time','E_S_duration']
+    filtered_columns = [col for col in df_sched.columns if col in valid_schedule_names or col in hpwh_cols]
+
     dropped_columns = [col for col in df_sched.columns if col not in filtered_columns]
     if dropped_columns:
         print(f"Dropped invalid schedules for {home_path}: {dropped_columns}")
@@ -147,6 +156,7 @@ def filter_schedules(home_path):
     df_sched_filtered = df_sched[filtered_columns]
     df_sched_filtered.to_csv(filtered_sched_file, index=False)
     return filtered_sched_file
+
 
 #########################################
 # SIMULATION FUNCTION
@@ -213,10 +223,10 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
     df_ctrl = df_ctrl[[c for c in CTRL_COLS if c in df_ctrl.columns]]
     df_base = df_base[[c for c in BASE_COLS if c in df_base.columns]]
         
-    df_ctrl.to_csv(os.path.join(results_dir, 'hpwh_controlled.csv'), index=False)
-    df_base.to_csv(os.path.join(results_dir, 'hpwh_baseline.csv'), index=False)
+    df_ctrl.to_parquet(os.path.join(results_dir, 'hpwh_controlled.parquet'), index=False)
+    df_base.to_parquet(os.path.join(results_dir, 'hpwh_baseline.parquet'), index=False)
 
-    cleanup_results_dir(results_dir, keep_files=['hpwh_baseline.csv', 'hpwh_controlled.csv'])
+    cleanup_results_dir(results_dir, keep_files=['hpwh_baseline.parquet', 'hpwh_controlled.parquet'])
 
     return df_ctrl, df_base
 
@@ -271,43 +281,21 @@ def cleanup_results_dir(results_dir, keep_files=None):
 #########################################
 # MAIN EXECUTION
 #########################################
-import distutils.dir_util
+
 if __name__ == "__main__":
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(WEATHER_DIR, exist_ok=True)
     
 
-    # # Copy homes and weather file
-    # for item in os.listdir(DEFAULT_INPUT):
-    #     src = os.path.join(DEFAULT_INPUT, item)
-    #     dst = os.path.join(INPUT_DIR, item)
-    #     if os.path.isdir(src) and not os.path.exists(dst):
-    #         shutil.copytree(src, dst)
-
-    # if not os.path.exists(WEATHER_FILE):
-    #     shutil.copy(DEFAULT_WEATHER, WEATHER_FILE)
-    
-
-    
-    # Copy homes from DEFAULT_INPUT -> INPUT_DIR (overwrite if needed)
+    # Copy homes and weather file
     for item in os.listdir(DEFAULT_INPUT):
         src = os.path.join(DEFAULT_INPUT, item)
         dst = os.path.join(INPUT_DIR, item)
-        if os.path.isdir(src):
-            print(f"Copying {src} -> {dst}")
-            # Copies everything recursively
-            distutils.dir_util.copy_tree(src, dst)
-    
-    # Copy weather file if missing
+        if os.path.isdir(src) and not os.path.exists(dst):
+            shutil.copytree(src, dst)
+
     if not os.path.exists(WEATHER_FILE):
         shutil.copy(DEFAULT_WEATHER, WEATHER_FILE)
-    
-    # Verify schedules exist for each home
-    for home in os.listdir(INPUT_DIR):
-        sched_file = os.path.join(INPUT_DIR, home, 'schedules.csv')
-        if not os.path.exists(sched_file):
-            print(f"Warning: schedules.csv missing for {home}")
-
 
     # Discover homes
     homes = find_all_homes(INPUT_DIR)
@@ -416,10 +404,8 @@ if __name__ == "__main__":
         # Save schedule for this home
         # -----------------------------
         home_schedules[home] = sched
-
-
-
-
+        
+        
     # Run parallel simulations
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         futures = [
@@ -432,6 +418,8 @@ if __name__ == "__main__":
             except Exception as e:
                 print("Simulation failed:", e)
 
+
+
     print("All simulations complete!")
 
     # Aggregate results
@@ -439,25 +427,25 @@ if __name__ == "__main__":
         all_ctrl, all_base = [], []
         for home in homes:
             results_dir = os.path.join(home, "Results")
-            ctrl_file = os.path.join(results_dir, "hpwh_controlled.csv")
-            base_file = os.path.join(results_dir, "hpwh_baseline.csv")
+            ctrl_file = os.path.join(results_dir, "hpwh_controlled.parquet")
+            base_file = os.path.join(results_dir, "hpwh_baseline.parquet")
 
             if os.path.exists(ctrl_file):
-                df_ctrl = pd.read_csv(ctrl_file)
+                df_ctrl = pd.read_parquet(ctrl_file)
                 df_ctrl["Home"] = os.path.basename(home)
                 all_ctrl.append(df_ctrl)
             if os.path.exists(base_file):
-                df_base = pd.read_csv(base_file)
+                df_base = pd.read_parquet(base_file)
                 df_base["Home"] = os.path.basename(home)
                 all_base.append(df_base)
 
         if all_ctrl:
             df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
-            df_ctrl_all.to_csv(os.path.join(work_dir, filename + "_Control.csv"), index=False)
+            df_ctrl_all.to_parquet(os.path.join(work_dir, filename + "_Control.parquet"), index=False)
         if all_base:
             df_base_all = pd.concat(all_base, ignore_index=True)
-            df_base_all.to_csv(os.path.join(work_dir, filename +"_Baseline.csv"), index=False)
-        print("Aggregated CSVs written!")
+            df_base_all.to_parquet(os.path.join(work_dir, filename +"_Baseline.parquet"), index=False)
+        print("Aggregated parquet files written!")
 
     aggregate_results(homes, WORKING_DIR)
     

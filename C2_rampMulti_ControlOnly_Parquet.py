@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Controlled-only HPWH Simulation with Coordinated Shed Periods, Randomized Load-up Times, and Per-Bin Jitter
-"""
+
 
 import os
 import shutil
@@ -13,6 +11,7 @@ import concurrent.futures
 import random
 import threading
 import time
+from ochre.cli import run_multiple_local
 
 start_time = time.time()
 print(start_time)
@@ -21,7 +20,7 @@ print(start_time)
 # USER SETTINGS
 #########################################
 
-filename = '180109_2_3_RCJ_control_only2'
+filename = '1800202_1_3_ParquetTest3'
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -32,10 +31,11 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 1, 9, 0, 0)
-Duration = 2  # days
+Start = dt.datetime(2018, 2, 2, 0, 0)
+Duration = 4  # days
 t_res = 3  # minutes
 TIME_JITTER_MIN = 5
+jitter_min = TIME_JITTER_MIN
 
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 126
@@ -249,7 +249,8 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
     df_ctrl = df_ctrl[[c for c in CTRL_COLS if c in df_ctrl.columns]]
     
     
-    df_ctrl.to_csv(os.path.join(results_dir, 'hpwh_controlled.csv'), index=False)
+    
+    df_ctrl.to_parquet(os.path.join(results_dir, 'hpwh_controlled.parquet'), index=False)
 
     return df_ctrl
 
@@ -278,15 +279,15 @@ def aggregate_results(homes, work_dir):
     all_ctrl = []
     for home in homes:
         results_dir = os.path.join(home, "Results")
-        ctrl_file = os.path.join(results_dir, "hpwh_controlled.csv")
+        ctrl_file = os.path.join(results_dir, "hpwh_controlled.parquet")
         if os.path.exists(ctrl_file):
-            df_ctrl = pd.read_csv(ctrl_file)
+            df_ctrl = pd.read_parquet(ctrl_file)
             df_ctrl["Home"] = os.path.basename(home)
             all_ctrl.append(df_ctrl)
     if all_ctrl:
         df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
-        df_ctrl_all.to_csv(os.path.join(work_dir, filename + "_Control.csv"), index=False)
-    print("Aggregated CSV written!")
+        df_ctrl_all.to_parquet(os.path.join(work_dir, filename + "_Control.parquet"), index=False)
+    print("Aggregated parquet file written!")
 
 #########################################
 # MAIN EXECUTION
@@ -307,15 +308,130 @@ if __name__ == "__main__":
     homes = find_all_homes(INPUT_DIR)
     print(f"Found {len(homes)} homes")
 
-    home_schedules = {home: my_schedule.copy() for home in homes}
+    # Weighted pools
+    M_LU_weighted_pool = [bin_time for bin_time, weight in zip(M_LU_bins, M_LU_weights) for _ in range(weight)]
+    random.shuffle(M_LU_weighted_pool)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    MS_bins = pd.date_range("10:00", "13:45", freq="15min")
+    MS_weights = [20, 23, 24, 23, 22, 22, 25, 26, 26, 29, 29, 29, 29, 27, 28, 27]
+    MS_offsets = [(t - pd.Timestamp("10:00")).total_seconds()/3600 for t in MS_bins]
+    MS_weighted_pool = [offset for offset, w in zip(MS_offsets, MS_weights) for _ in range(w)]
+    random.shuffle(MS_weighted_pool)
+      
+
+    E_ALU_weighted_pool = [bin_time for bin_time, weight in zip(E_ALU_bins, E_ALU_weights) for _ in range(weight)]
+    random.shuffle(E_ALU_weighted_pool)
+    
+    ES_bins = pd.date_range("20:00", "23:45", freq="15min")
+    # ES_weights = [26, 32, 35, 37, 38, 36, 35, 34, 34, 33, 33, 36] # this is the original
+    ES_weights = [17, 21, 24, 25, 26, 24, 24, 23, 23, 23, 23, 25, 28, 30, 33, 40]
+    ES_offsets = [(t - pd.Timestamp("20:00")).total_seconds()/3600 for t in ES_bins]
+    ES_weighted_pool = [offset2 for offset2, m in zip(ES_offsets, ES_weights) for _ in range(m)]
+    random.shuffle(ES_weighted_pool)
+
+
+    # Assign schedules per home
+    home_schedules = {}
+    fmt = "%H:%M"
+    
+    for home in homes:
+        sched = my_schedule.copy()
+    
+        # -----------------------------
+        # M_LU_time with jitter
+        # -----------------------------
+        if M_LU_weighted_pool:
+            M_LU_base = M_LU_weighted_pool.pop()
+        else:
+            M_LU_base = random.choice(M_LU_bins)
+        # Add jitter +/- 7.5 minutes
+        t_base = pd.to_datetime(M_LU_base, format=fmt)
+        jitter = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
+        t_jittered = t_base + jitter
+        sched['M_LU_time'] = t_jittered.strftime(fmt)
+    
+        # -----------------------------
+        # M_S_time and M_LU_duration with jitter
+        # -----------------------------
+        if M_LU_base == '05:45':
+            t_MS_start = pd.to_datetime("06:15", format=fmt)
+        else:
+            t_MS_start = pd.to_datetime(my_schedule['M_S_time'], format=fmt)
+        # Add jitter +/- 15 min to M_S_time
+        t_MS_start += pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
+        sched['M_S_time'] = t_MS_start.strftime(fmt)
+    
+        # M_LU_duration based on actual start of M_S
+        t_MLU_start = pd.to_datetime(sched['M_LU_time'], format=fmt)
+        t_MLU_end = t_MS_start
+        if t_MLU_end <= t_MLU_start:
+            t_MLU_end += pd.Timedelta(days=1)
+        sched['M_LU_duration'] = max(1, (t_MLU_end - t_MLU_start).total_seconds() / 3600)
+    
+        # Random M_S duration +/- 1 hour
+        if MS_weighted_pool:
+            n = MS_weighted_pool.pop()
+        else:
+            n = random.choice(MS_offsets)
+        sched['M_S_duration'] = 4 + n
+    
+        # -----------------------------
+        # Evening Schedule Assignment
+        # -----------------------------
+        
+        # E_ALU_time with jitter
+        if E_ALU_weighted_pool:
+            E_ALU_base = E_ALU_weighted_pool.pop()
+        else:
+            E_ALU_base = random.choice(E_ALU_bins)
+        t_E_ALU_start = pd.to_datetime(E_ALU_base, format=fmt)
+        jitter = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
+        t_E_ALU_start += jitter
+        sched['E_ALU_time'] = t_E_ALU_start.strftime(fmt)
+        
+        # E_S_time with jitter
+        t_ES_start = pd.to_datetime(my_schedule['E_S_time'], format=fmt)
+        t_ES_start += pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
+        sched['E_S_time'] = t_ES_start.strftime(fmt)
+        
+        # E_ALU_duration = time from E_ALU start to E_S start
+        if t_ES_start <= t_E_ALU_start:  # handle crossing midnight
+            t_ES_start += pd.Timedelta(days=1)
+        sched['E_ALU_duration'] = max(1, (t_ES_start - t_E_ALU_start).total_seconds() / 3600)  # minimum 30 min
+
+        
+        # E_S_duration with weighted offset
+        if ES_weighted_pool:
+            n = ES_weighted_pool.pop()
+        else:
+            n = random.choice(ES_offsets)
+        sched['E_S_duration'] = 3 + n
+
+        # -----------------------------
+        # Save schedule for this home
+        # -----------------------------
+        home_schedules[home] = sched
+
+
+
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = [executor.submit(simulate_home, home, WEATHER_FILE, home_schedules[home]) for home in homes]
         for f in concurrent.futures.as_completed(futures):
             try:
                 f.result()
             except Exception as e:
                 print("Simulation failed:", e)
+    
+    # Run simulations in parallel using OCHRE's built-in multiprocessing
+   
+    # run_multiple_local(
+    #     input_paths=homes,
+    #     n_parallel=8,                    # Number of parallel processes
+    #     duration=Duration,               # Simulation duration (days)
+    #     weather_file_or_path=WEATHER_FILE
+    # )
+
 
     print("All simulations complete!")
 
