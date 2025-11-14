@@ -1,5 +1,6 @@
 ## OCHRE Testing Scripts Using CTA-2045 HPWH Settings:
-- These scripts can be used to simulate HPWHs in residential buildings. 
+- These scripts can be used to simulate HPWHs in residential buildings.
+- These scripts were developed to generate a CTA-2045 Implementation Guide for residential HPWHs.
 
 ### Requirements:
 
