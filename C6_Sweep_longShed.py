@@ -5,7 +5,6 @@ Created on Mon Nov 10 12:06:45 2025
 @author: danap
 """
 
-
 import os
 import shutil
 import datetime as dt
@@ -19,17 +18,16 @@ import datetime
 import numpy as np
 
 
-print(datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z'))
-
-
+print(datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')) 
 start_time = time.time()
-
 
 #########################################
 # USER SETTINGS
 #########################################
 
-filename = '180407_1_15_xx' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_ShedLong125' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+# 04 / 07 
+
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -40,15 +38,15 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 4, 7, 0, 0)
+Start = dt.datetime(2018, 1, 10, 0, 0)
 Duration = 2  # days
-t_res = 15  # minutes
+t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 125
-step = 5 #F
-Tcontrol_dbF = np.arange(5, 15 + step, step) #<------------------------------------------
+step = 5
+Tcontrol_dbF = np.arange(5, 15 + step, step)  # Deadband sweep list (°F)
 Tcontrol_deadbandF = 10
 Tcontrol_LOADF = 130
 Tcontrol_LOADdeadbandF = 2
@@ -61,28 +59,18 @@ my_schedule = {
     'M_LU_time': '03:00',
     'M_LU_duration': 3,
     'M_S_time': '06:00',
-    'M_S_duration': 4,
-    'E_ALU_time': '16:00',
-    'E_ALU_duration': 1,
-    'E_S_time': '17:00',
-    'E_S_duration': 3
+    'M_S_duration': 18,
 }
-
-
 
 # Randomization bins
 M_LU_weights = [14, 28, 34, 41, 46, 46, 41, 33, 30, 31, 35, 30]
 M_LU_bins = pd.date_range("03:00", periods=len(M_LU_weights), freq="15min").strftime("%H:%M").tolist()
 
 
-E_ALU_weights = [17, 21, 27, 37, 40, 46, 40, 42, 36, 32, 33, 38]
-E_ALU_bins = pd.date_range("14:00", periods=len(E_ALU_weights), freq="15min").strftime("%H:%M").tolist()
-
-
 #########################################
 # TEMPERATURE CONVERSIONS F to C
 #########################################
- 
+
 def f_to_c(temp_f): 
     return (temp_f - 32) * 5/9
 
@@ -90,8 +78,7 @@ def f_to_c_DB(temp_f):
     return 5/9 * temp_f
 
 Tcontrol_SHEDC = f_to_c(Tcontrol_SHEDF)
-Tcontrol_deadbandC = Tcontrol_dbF * 5/9
-# Tcontrol_deadbandC = f_to_c_DB(Tcontrol_deadbandF) #<----------------------------------
+Tcontrol_deadbandC_list = Tcontrol_dbF * 5/9  
 Tcontrol_LOADC = f_to_c(Tcontrol_LOADF)
 Tcontrol_LOADdeadbandC = f_to_c_DB(Tcontrol_LOADdeadbandF)
 TbaselineC = f_to_c(TbaselineF)
@@ -102,7 +89,7 @@ TinitC = f_to_c(Tinit)
 # HPWH CONTROL FUNCTION
 #########################################
 
-def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, **kwargs):
+def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, deadband_C, **kwargs):  
     ctrl_signal = {
         'Water Heating': {
             'Setpoint': TbaselineC,
@@ -120,19 +107,17 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, **kwargs):
     ranges = {
         'M_LU': get_time_range('M_LU'),
         'M_S': get_time_range('M_S'),
-        'E_ALU': get_time_range('E_ALU'),
-        'E_S': get_time_range('E_S'),
     }
 
-    if ranges['M_LU'][0] <= sim_time < ranges['M_LU'][1] or ranges['E_ALU'][0] <= sim_time < ranges['E_ALU'][1]:
+    if ranges['M_LU'][0] <= sim_time < ranges['M_LU'][1]:
         ctrl_signal['Water Heating'].update({
             'Setpoint': Tcontrol_LOADC,
             'Deadband': Tcontrol_LOADdeadbandC
         })
-    elif ranges['M_S'][0] <= sim_time < ranges['M_S'][1] or ranges['E_S'][0] <= sim_time < ranges['E_S'][1]:
+    elif ranges['M_S'][0] <= sim_time < ranges['M_S'][1]:
         ctrl_signal['Water Heating'].update({
             'Setpoint': Tcontrol_SHEDC,
-            'Deadband': Tcontrol_deadbandC
+            'Deadband': deadband_C  # <<< use the current sweep value
         })
 
     return ctrl_signal
@@ -148,9 +133,8 @@ def filter_schedules(home_path):
     df_sched = pd.read_csv(orig_sched_file)
     valid_schedule_names = set(ALL_SCHEDULE_NAMES.keys())
 
-    # Keep all HPWH custom columns too
-    hpwh_cols = ['M_LU_time','M_LU_duration','M_S_time','M_S_duration',
-                 'E_ALU_time','E_ALU_duration','E_S_time','E_S_duration']
+    hpwh_cols = ['M_LU_time','M_LU_duration','M_S_time','M_S_duration']
+
     filtered_columns = [col for col in df_sched.columns if col in valid_schedule_names or col in hpwh_cols]
 
     dropped_columns = [col for col in df_sched.columns if col not in filtered_columns]
@@ -161,13 +145,11 @@ def filter_schedules(home_path):
     df_sched_filtered.to_csv(filtered_sched_file, index=False)
     return filtered_sched_file
 
-
 #########################################
 # SIMULATION FUNCTION
 #########################################
 
-def simulate_home(home_path, weather_file_path, schedule_cfg):
-
+def simulate_home(home_path, weather_file_path, schedule_cfg, deadband_C):  # <<< CHANGED
     filtered_sched_file = filter_schedules(home_path)
     hpxml_file = os.path.join(home_path, 'in.XML')
     results_dir = os.path.join(home_path, "Results")
@@ -193,24 +175,19 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
         }
     }
 
-    # # Baseline
-    # base_dwelling = Dwelling(name="HPWH Baseline", **dwelling_args_local)
-    # for t_base in base_dwelling.sim_times:
-    #     base_ctrl = {"Water Heating": {"Setpoint": TbaselineC, "Deadband": TdeadbandC, "Load Fraction": 1}}
-    #     base_dwelling.update(control_signal=base_ctrl)
-    # df_base, _, _ = base_dwelling.finalize()
-
-    # Controlled
     sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
     hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
+
     for sim_time in sim_dwelling.sim_times:
         current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-        control_cmd = determine_hpwh_control(sim_time=sim_time, current_temp_c=current_setpt, sched_cfg=schedule_cfg)
+        control_cmd = determine_hpwh_control(sim_time=sim_time,
+                                             current_temp_c=current_setpt,
+                                             sched_cfg=schedule_cfg,
+                                             deadband_C=deadband_C)
         sim_dwelling.update(control_signal=control_cmd)
     df_ctrl, _, _ = sim_dwelling.finalize()
 
     df_ctrl = remove_first_day(df_ctrl, Start)
-    # df_base = remove_first_day(df_base, Start)
 
     CTRL_COLS = ["Time", "Total Electric Power (kW)",
                  "Total Electric Energy (kWh)",
@@ -222,15 +199,22 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
                  "Water Heating Control Temperature (C)",
                  "Hot Water Outlet Temperature (C)",
                  "Temperature - Indoor (C)"]
-    # BASE_COLS = CTRL_COLS
 
     df_ctrl = df_ctrl[[c for c in CTRL_COLS if c in df_ctrl.columns]]
-    # df_base = df_base[[c for c in BASE_COLS if c in df_base.columns]]
-        
-    df_ctrl.to_parquet(os.path.join(results_dir, 'hpwh_controlled.parquet'), index=False)
-    # df_base.to_parquet(os.path.join(results_dir, 'hpwh_baseline.parquet'), index=False)
 
-    cleanup_results_dir(results_dir, keep_files=['hpwh_baseline.parquet', 'hpwh_controlled.parquet'])
+    suffix = f"_DB{round(deadband_C * 9/5)}F"  # <<< ADDED: file suffix
+    out_path = os.path.join(results_dir, f"hpwh_controlled{suffix}.parquet")
+    df_ctrl.to_parquet(out_path, index=False)
+
+    # <<< CHANGED >>> Do NOT delete other sweep results. Keep all _DB*.parquet files.
+    # If you want to remove non-parquet junk, do that safely here (example below).
+    for item in os.listdir(results_dir):
+        path = os.path.join(results_dir, item)
+        if os.path.isfile(path) and not item.endswith(".parquet"):
+            try:
+                os.remove(path)
+            except Exception as e:
+                print(f"Could not delete {path}: {e}")
 
     return df_ctrl
 
@@ -268,7 +252,6 @@ def remove_first_day(df, start_date):
 def cleanup_results_dir(results_dir, keep_files=None):
     if keep_files is None:
         keep_files = []
-
     for item in os.listdir(results_dir):
         path = os.path.join(results_dir, item)
         if os.path.isfile(path) and item not in keep_files:
@@ -289,9 +272,7 @@ def cleanup_results_dir(results_dir, keep_files=None):
 if __name__ == "__main__":
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(WEATHER_DIR, exist_ok=True)
-    
 
-    # Copy homes and weather file
     for item in os.listdir(DEFAULT_INPUT):
         src = os.path.join(DEFAULT_INPUT, item)
         dst = os.path.join(INPUT_DIR, item)
@@ -301,159 +282,137 @@ if __name__ == "__main__":
     if not os.path.exists(WEATHER_FILE):
         shutil.copy(DEFAULT_WEATHER, WEATHER_FILE)
 
-    # Discover homes
     homes = find_all_homes(INPUT_DIR)
     print(f"Found {len(homes)} homes")
 
-    # Weighted pools
+    # Weighted pools setup (same as before)
     M_LU_weighted_pool = [bin_time for bin_time, weight in zip(M_LU_bins, M_LU_weights) for _ in range(weight)]
-    random.shuffle(M_LU_weighted_pool)
 
-    MS_bins = pd.date_range("10:00", "13:45", freq="15min")
-    MS_weights = [20, 23, 24, 23, 22, 22, 25, 26, 26, 29, 29, 29, 29, 27, 28, 27]
-    MS_offsets = [(t - pd.Timestamp("10:00")).total_seconds()/3600 for t in MS_bins]
-    MS_weighted_pool = [offset for offset, w in zip(MS_offsets, MS_weights) for _ in range(w)]
-    random.shuffle(MS_weighted_pool)
-      
-
-    E_ALU_weighted_pool = [bin_time for bin_time, weight in zip(E_ALU_bins, E_ALU_weights) for _ in range(weight)]
-    random.shuffle(E_ALU_weighted_pool)
     
-    ES_bins = pd.date_range("20:00", "23:45", freq="15min")
-    # ES_weights = [26, 32, 35, 37, 38, 36, 35, 34, 34, 33, 33, 36] # this is the original
-    ES_weights = [17, 21, 24, 25, 26, 24, 24, 23, 23, 23, 23, 25, 28, 30, 33, 40]
-    ES_offsets = [(t - pd.Timestamp("20:00")).total_seconds()/3600 for t in ES_bins]
-    ES_weighted_pool = [offset2 for offset2, m in zip(ES_offsets, ES_weights) for _ in range(m)]
-    random.shuffle(ES_weighted_pool)
-
-
-    # Assign schedules per home
     home_schedules = {}
     fmt = "%H:%M"
     
     for home in homes:
         sched = my_schedule.copy()
-    
+        
         # -----------------------------
-        # M_LU_time with jitter
+        # Randomize morning usage start
         # -----------------------------
         if M_LU_weighted_pool:
             M_LU_base = M_LU_weighted_pool.pop()
         else:
             M_LU_base = random.choice(M_LU_bins)
-        # Add jitter +/- 7.5 minutes
         t_base = pd.to_datetime(M_LU_base, format=fmt)
         jitter = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
         t_jittered = t_base + jitter
         sched['M_LU_time'] = t_jittered.strftime(fmt)
-    
+        
         # -----------------------------
-        # M_S_time and M_LU_duration with jitter
+        # Randomize midday start
         # -----------------------------
-        if M_LU_base == '05:45':
-            t_MS_start = pd.to_datetime("06:15", format=fmt)
-        else:
-            t_MS_start = pd.to_datetime(my_schedule['M_S_time'], format=fmt)
-        # Add jitter +/- 15 min to M_S_time
+        t_MS_start = pd.to_datetime(my_schedule['M_S_time'], format=fmt)
         t_MS_start += pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
         sched['M_S_time'] = t_MS_start.strftime(fmt)
-    
-        # M_LU_duration based on actual start of M_S
+        
+        # -----------------------------
+        # Calculate M_LU_duration
+        # -----------------------------
         t_MLU_start = pd.to_datetime(sched['M_LU_time'], format=fmt)
-        t_MLU_end = t_MS_start
+        min_end = pd.to_datetime("06:00", format=fmt)  # minimum end at 6 AM
+        t_MLU_end = max(min_end, t_MS_start)           # ensure ends at least 6 AM
+        
+        # Handle crossing midnight
         if t_MLU_end <= t_MLU_start:
             t_MLU_end += pd.Timedelta(days=1)
+        
+        # Duration in hours, minimum 1 hour
         sched['M_LU_duration'] = max(1, (t_MLU_end - t_MLU_start).total_seconds() / 3600)
-    
-        # Random M_S duration +/- 1 hour
-        if MS_weighted_pool:
-            n = MS_weighted_pool.pop()
-        else:
-            n = random.choice(MS_offsets)
-        sched['M_S_duration'] = 4 + n
-    
+        
         # -----------------------------
-        # Evening Schedule Assignment
-        # -----------------------------
-        
-        # E_ALU_time with jitter
-        if E_ALU_weighted_pool:
-            E_ALU_base = E_ALU_weighted_pool.pop()
-        else:
-            E_ALU_base = random.choice(E_ALU_bins)
-        t_E_ALU_start = pd.to_datetime(E_ALU_base, format=fmt)
-        jitter = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
-        t_E_ALU_start += jitter
-        sched['E_ALU_time'] = t_E_ALU_start.strftime(fmt)
-        
-        # E_S_time with jitter
-        t_ES_start = pd.to_datetime(my_schedule['E_S_time'], format=fmt)
-        t_ES_start += pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
-        sched['E_S_time'] = t_ES_start.strftime(fmt)
-        
-        # E_ALU_duration = time from E_ALU start to E_S start
-        if t_ES_start <= t_E_ALU_start:  # handle crossing midnight
-            t_ES_start += pd.Timedelta(days=1)
-        sched['E_ALU_duration'] = max(1, (t_ES_start - t_E_ALU_start).total_seconds() / 3600)  # minimum 30 min
-
-        
-        # E_S_duration with weighted offset
-        if ES_weighted_pool:
-            n = ES_weighted_pool.pop()
-        else:
-            n = random.choice(ES_offsets)
-        sched['E_S_duration'] = 3 + n
-
-        # -----------------------------
-        # Save schedule for this home
+        # Save schedule
         # -----------------------------
         home_schedules[home] = sched
-        
-        
-    # Run parallel simulations
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [
-            executor.submit(simulate_home, home, WEATHER_FILE, home_schedules[home])
-            for home in homes
-        ]
-        for f in concurrent.futures.as_completed(futures):
-            try:
-                f.result()
-            except Exception as e:
-                print("Simulation failed:", e)
 
 
+    #########################################
+    # SWEEP DEADBANDBAND VALUES
+    #########################################
 
-    print("All simulations complete!")
+    for deadband_C in Tcontrol_deadbandC_list:
+        print(f"\n=== Running simulations for deadband {deadband_C:.2f} °C ({round(deadband_C*9/5)} °F) ===")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [
+                executor.submit(simulate_home, home, WEATHER_FILE, home_schedules[home], deadband_C)
+                for home in homes
+            ]
+            for f in concurrent.futures.as_completed(futures):
+                try:
+                    f.result()
+                except Exception as e:
+                    print("Simulation failed:", e)
 
-    # Aggregate results
+    #########################################
+    # AGGREGATE RESULTS
+    #########################################
+
     def aggregate_results(homes, work_dir):
-        all_ctrl, all_base = [], []
-        for home in homes:
-            results_dir = os.path.join(home, "Results")
-            ctrl_file = os.path.join(results_dir, "hpwh_controlled.parquet")
-            base_file = os.path.join(results_dir, "hpwh_baseline.parquet")
-
-            if os.path.exists(ctrl_file):
-                df_ctrl = pd.read_parquet(ctrl_file)
-                df_ctrl["Home"] = os.path.basename(home)
-                all_ctrl.append(df_ctrl)
-            if os.path.exists(base_file):
-                df_base = pd.read_parquet(base_file)
-                df_base["Home"] = os.path.basename(home)
-                all_base.append(df_base)
-
-        if all_ctrl:
-            df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
-            df_ctrl_all.to_parquet(os.path.join(work_dir, filename + "_Control.parquet"), index=False)
-        if all_base:
-            df_base_all = pd.concat(all_base, ignore_index=True)
-            df_base_all.to_parquet(os.path.join(work_dir, filename +"_Baseline.parquet"), index=False)
-        print("Aggregated parquet files written!")
+        for deadband_C in Tcontrol_deadbandC_list:
+            suffix = f"_DB{round(deadband_C * 9/5)}F"
+            all_ctrl = []
+            for home in homes:
+                results_dir = os.path.join(home, "Results")
+                ctrl_file = os.path.join(results_dir, f"hpwh_controlled{suffix}.parquet")
+                if os.path.exists(ctrl_file):
+                    df_ctrl = pd.read_parquet(ctrl_file)
+                    df_ctrl["Home"] = os.path.basename(home)
+                    df_ctrl["Deadband_C"] = deadband_C
+                    all_ctrl.append(df_ctrl)
+            if all_ctrl:
+                df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
+                outp = os.path.join(work_dir, filename + f"{suffix}_Control.parquet")
+                df_ctrl_all.to_parquet(outp, index=False)
+                print(f"Aggregated results written for {suffix}")
 
     aggregate_results(homes, WORKING_DIR)
+
+
+
+    def aggregate_current_setpoint(work_dir, prefix):
+        """
+        Aggregate all per-deadband HPWH control files produced by aggregate_results
+        for the same simulation prefix (date, duration, setpoint).
     
+        Example:
+            prefix = '180110_1_3_Shed110'
+            Input files: 180110_1_3_Shed110_DB5F_Control.parquet,
+                         180110_1_3_Shed110_DB10F_Control.parquet, ...
+            Output file: 180110_1_3_Shed110_Control.parquet
+        """
+        # Find all _DB*.parquet files for this prefix
+        all_files = [
+            f for f in os.listdir(work_dir)
+            if f.endswith("_Control.parquet") and f.startswith(prefix + "_DB")
+        ]
     
+        if not all_files:
+            print(f"No deadband files found for prefix {prefix}")
+            return
+    
+        all_dfs = []
+        for f in all_files:
+            path = os.path.join(work_dir, f)
+            df = pd.read_parquet(path)
+            df["SourceFile"] = f  # track which deadband this came from
+            all_dfs.append(df)
+    
+        df_master = pd.concat(all_dfs, ignore_index=True)
+        master_file = os.path.join(work_dir, f"{prefix}_Control.parquet")
+        df_master.to_parquet(master_file, index=False)
+        print(f"Aggregated {len(all_files)} deadband files for {prefix} → {master_file}")
+
+
+    aggregate_current_setpoint(WORKING_DIR, filename)
+
 
 end_time = time.time()
 execution_time = end_time - start_time
