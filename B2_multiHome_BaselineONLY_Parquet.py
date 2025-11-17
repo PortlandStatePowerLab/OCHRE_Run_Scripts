@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Oct 15 16:21:04 2025
+Created on Mon Nov 17 11:16:05 2025
 
 @author: danap
 """
-
 
 
 import os
@@ -14,30 +13,28 @@ import pandas as pd
 from ochre import Dwelling
 from ochre.utils.schedule import ALL_SCHEDULE_NAMES
 import concurrent.futures
-import time
-
-start_time = time.time()
 
 #########################################
 # USER SETTINGS
 #########################################
 
-filename = '180117_1_3_Multi' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180111_1_15_NR'
 
-# Paths
+# Original OCHRE defaults folder
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
 DEFAULT_WEATHER = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Weather\USA_OR_Portland.Intl.AP.726980_TMY3.epw"
+
+# Safe working folder (writable)
 WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
 INPUT_DIR = os.path.join(WORKING_DIR, "Input Files")
 WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
+
 # Simulation parameters
 Start = dt.datetime(2018, 1, 10, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
-
-
 
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 126
@@ -50,12 +47,12 @@ Tinit = 128
 
 # Schedule variant
 my_schedule = {
-    'M_LU_time': '05:00',
-    'M_LU_duration': 1,
+    'M_LU_time': '05:30',
+    'M_LU_duration': 0.5,
     'M_S_time': '06:00',
     'M_S_duration': 4,
-    'E_ALU_time': '16:00',
-    'E_ALU_duration': 1,
+    'E_ALU_time': '16:30',
+    'E_ALU_duration': 0.5,
     'E_S_time': '17:00',
     'E_S_duration': 3
 }
@@ -167,18 +164,26 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
         }
     }
 
-    # Skip baseline simulation
+    # Baseline
+    base_dwelling = Dwelling(name="HPWH Baseline", **dwelling_args_local)
+    for t_base in base_dwelling.sim_times:
+        base_ctrl = {"Water Heating": {"Setpoint": TbaselineC, "Deadband": TdeadbandC, "Load Fraction": 1}}
+        base_dwelling.update(control_signal=base_ctrl)
+    df_base, _, _ = base_dwelling.finalize()
 
     # Controlled
-    sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
-    hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
-    for sim_time in sim_dwelling.sim_times:
-        current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-        control_cmd = determine_hpwh_control(sim_time=sim_time, current_temp_c=current_setpt, sched_cfg=schedule_cfg)
-        sim_dwelling.update(control_signal=control_cmd)
-    df_ctrl, _, _ = sim_dwelling.finalize()
+    # sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
+    # hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
+    # for sim_time in sim_dwelling.sim_times:
+    #     current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
+    #     control_cmd = determine_hpwh_control(sim_time=sim_time, current_temp_c=current_setpt, sched_cfg=schedule_cfg)
+    #     sim_dwelling.update(control_signal=control_cmd)
+    # df_ctrl, _, _ = sim_dwelling.finalize()
 
-    df_ctrl = remove_first_day(df_ctrl, Start)
+
+    # df_ctrl = remove_first_day(df_ctrl, Start)
+    df_base = remove_first_day(df_base, Start)
+    
 
     CTRL_COLS = ["Time", "Total Electric Power (kW)",
                  "Total Electric Energy (kWh)",
@@ -190,12 +195,19 @@ def simulate_home(home_path, weather_file_path, schedule_cfg):
                  "Water Heating Control Temperature (C)",
                  "Hot Water Outlet Temperature (C)",
                  "Temperature - Indoor (C)"]
+    BASE_COLS = CTRL_COLS
+    
 
-    df_ctrl = df_ctrl[[c for c in CTRL_COLS if c in df_ctrl.columns]]
-    df_ctrl.to_csv(os.path.join(results_dir, 'hpwh_controlled.csv'), index=False)
+    # df_ctrl = df_ctrl[[c for c in CTRL_COLS if c in df_ctrl.columns]]
 
-    return df_ctrl, None
+    df_base = df_base[[c for c in BASE_COLS if c in df_base.columns]]
+        
+    
+    # df_ctrl.to_parquet(os.path.join(results_dir, 'hpwh_controlled.parquet'), index=False)
+    df_base.to_parquet(os.path.join(results_dir, 'hpwh_baseline.parquet'), index=False)
 
+
+    return df_base
 
 #########################################
 # FIND ALL HOMES
@@ -273,43 +285,35 @@ if __name__ == "__main__":
 
 
 
-
 def aggregate_results(homes, work_dir):
-    all_ctrl = []
+    all_ctrl, all_base = [], []
 
     for home in homes:
         results_dir = os.path.join(home, "Results")
-        ctrl_file = os.path.join(results_dir, "hpwh_controlled.csv")
+        # ctrl_file = os.path.join(results_dir, "hpwh_controlled.parquet")
+        base_file = os.path.join(results_dir, "hpwh_baseline.parquet")
 
-        if os.path.exists(ctrl_file):
-            df_ctrl = pd.read_csv(ctrl_file)
-            df_ctrl["Home"] = os.path.basename(home)
-            all_ctrl.append(df_ctrl)
+        # if os.path.exists(ctrl_file):
+        #     df_ctrl = pd.read_parquet(ctrl_file)
+        #     df_ctrl["Home"] = os.path.basename(home)
+        #     all_ctrl.append(df_ctrl)
 
-    if all_ctrl:
-        df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
-        df_ctrl_all.to_csv(os.path.join(work_dir, filename + "_Controlled.csv"), index=False)
+        if os.path.exists(base_file):
+            df_base = pd.read_parquet(base_file)
+            df_base["Home"] = os.path.basename(home)
+            all_base.append(df_base)
 
-    print("Aggregated controlled CSV written!")
+    # if all_ctrl:
+    #     df_ctrl_all = pd.concat(all_ctrl, ignore_index=True)
+    #     df_ctrl_all.to_parquet(os.path.join(work_dir, filename + "_Controlled.parquet"), index=False)
+
+    if all_base:
+        df_base_all = pd.concat(all_base, ignore_index=True)
+        df_base_all.to_parquet(os.path.join(work_dir, filename + "_Baseline.parquet"), index=False)
+
+    print("Aggregated parquet files written!")
 
 
-
-
-# CTRL_COLS = ["Time", "Total Electric Power (kW)",
-#              "Total Electric Energy (kWh)",
-#              "Water Heating Electric Power (kW)",
-#              "Water Heating COP (-)",
-#              "Water Heating Deadband Upper Limit (C)",
-#              "Water Heating Deadband Lower Limit (C)",
-#              "Water Heating Heat Pump COP (-)",
-#              "Water Heating Control Temperature (C)",
-#              "Hot Water Outlet Temperature (C)",
-#              "Temperature - Indoor (C)"]
-# BASE_COLS = CTRL_COLS
 
 aggregate_results(homes, WORKING_DIR)
 
-end_time = time.time()
-execution_time = end_time - start_time
-execution_min = execution_time/60
-print(f"Execution time: {execution_min} minutes")
