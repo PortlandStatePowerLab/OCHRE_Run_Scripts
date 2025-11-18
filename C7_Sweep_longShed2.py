@@ -37,7 +37,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180110_1_3_ShedLong95' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_ShedLong118' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 # 04 / 07 
 
 
@@ -56,15 +56,17 @@ t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 95
-step = 5
-Tcontrol_dbF = np.arange(5, 15 + step, step)  # Deadband sweep list (°F)
-Tcontrol_deadbandF = 10
-Tcontrol_LOADF = 130
+Tcontrol_SHEDF = 118
+step = 7
+Tcontrol_dbF = np.arange(7, 7 + step, step)  # Deadband sweep list (°F)
+# Tcontrol_deadbandF = 10
+Tcontrol_LOADF = 126
 Tcontrol_LOADdeadbandF = 2
-TbaselineF = 130
+TbaselineF = Tcontrol_LOADF
 TdeadbandF = 7
 Tinit = 128
+
+print(f'Tset = {Tcontrol_LOADF}')
 
 # Base schedule template
 my_schedule = {

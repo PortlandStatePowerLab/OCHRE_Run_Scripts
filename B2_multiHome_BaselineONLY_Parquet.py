@@ -18,7 +18,7 @@ import concurrent.futures
 # USER SETTINGS
 #########################################
 
-filename = '180111_1_15_NR'
+filename = '180110_1_3_Normal130'
 
 # Original OCHRE defaults folder
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
