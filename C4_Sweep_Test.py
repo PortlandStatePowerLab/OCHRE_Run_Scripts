@@ -46,6 +46,7 @@ jitter_min = 5
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 122
 step = 5
+ER_list = []
 Tcontrol_dbF = np.arange(5, 15 + step, step)  # Deadband sweep list (°F)
 Tcontrol_LOADF = 130
 Tcontrol_LOADdeadbandF = 2
