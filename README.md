@@ -13,6 +13,11 @@
 - C7_Sweep_longShedv2.py
     - This script sweeps _Shed_ temperature deadbands in a loop and aggregates data into one parquet file.
     - This is not analogous to an _Energy_ grid service. It is an extended _Shed_ period from 6am - midnight.
+ 
+- E0_LoadUpSweep
+    - This script performs a very long LoadUp or Advanced LoadUp and sweeps through deadbands.
+    - You can generate a list of deadbands to iterate through and it will aggregate results by deadband and one with all data as a parquet file.
+    - This script requires updated WaterHeater.py and Water.py files to avoid crashing simulation and missing house data. 
 
 
 
