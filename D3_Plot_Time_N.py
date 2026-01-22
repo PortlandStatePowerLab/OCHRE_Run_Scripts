@@ -20,7 +20,7 @@ start_time = time.time()
 #                           Enter inputs here                              #
 ############################################################################
 
-WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
+WORKING_DIR = r"C:\Users\danap\OCHRE_Working\!PESArchive"
   
 ninety_fifth_output_file  = "D1_180117_2_15_RCJ_95.csv"
 mean_output_file  = "D1_180117_2_15_RCJ_Mean.csv"

@@ -25,7 +25,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180110_1_3_Shed122' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_BaselineLoad' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 # 04 / 07 
 
 
@@ -38,7 +38,7 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 1, 10, 0, 0)
+Start = dt.datetime(2018, 1, 13, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
 jitter_min = 5
@@ -47,7 +47,7 @@ jitter_min = 5
 Tcontrol_SHEDF = 122
 step = 5
 ER_list = []
-Tcontrol_dbF = np.arange(5, 15 + step, step)  # Deadband sweep list (°F)
+Tcontrol_dbF = np.arange(7, 7 + step, step)  # Deadband sweep list (°F)
 Tcontrol_LOADF = 130
 Tcontrol_LOADdeadbandF = 2
 TbaselineF = 130
@@ -186,11 +186,48 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, deadband_C):  # <<
     hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
 
     for sim_time in sim_dwelling.sim_times:
-        current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-        control_cmd = determine_hpwh_control(sim_time=sim_time,
-                                             current_temp_c=current_setpt,
-                                             sched_cfg=schedule_cfg,
-                                             deadband_C=deadband_C)
+        
+        # --- Day 1: force baseline ---
+        if sim_time < Start + pd.Timedelta(days=1):
+            control_cmd = {
+                'Water Heating': {
+                    'Setpoint': TbaselineC,
+                    'Deadband': TdeadbandC,
+                    'Load Fraction': 1,
+                }
+            }
+            sim_dwelling.update(control_signal=control_cmd)
+            continue
+        
+# =============================================================================
+#         this is added delete until next block
+# =============================================================================
+        else:
+            control_cmd = {
+                'Water Heating': {
+                    'Setpoint': TbaselineC,
+                    'Deadband': TdeadbandC,
+                    'Load Fraction': 1,
+                }
+            }
+            sim_dwelling.update(control_signal=control_cmd)
+            continue
+        
+        
+
+# =============================================================================
+#         
+#         current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
+#         control_cmd = determine_hpwh_control(sim_time=sim_time,
+#                                              current_temp_c=current_setpt,
+#                                              sched_cfg=schedule_cfg,
+#                                              deadband_C=deadband_C)
+#         
+#         
+#         
+# =============================================================================
+        
+        
         sim_dwelling.update(control_signal=control_cmd)
     df_ctrl, _, _ = sim_dwelling.finalize()
 

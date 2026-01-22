@@ -17,6 +17,7 @@ import random
 import time
 import datetime
 import numpy as np
+import re
 
 
 print(datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z'))
@@ -29,7 +30,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180815_1_3_EnergyShed_122' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_EnergyShed_105' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -40,15 +41,15 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 8, 15, 0, 0)
+Start = dt.datetime(2018, 1, 13, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 123 #F
-step = 8 #F
-Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
+Tcontrol_SHEDF = 105 #F
+step = 5 #F
+Tcontrol_dbF = np.arange(5, 15 + step, step) #<------------------------------------------
 Tcontrol_LOADF = 130 #F
 Tcontrol_LOADdeadbandF = 2 #F
 TbaselineF = 130 #F
@@ -286,6 +287,52 @@ def cleanup_results_dir(results_dir, keep_files=None):
                 shutil.rmtree(path)
             except Exception as e:
                 print(f"Could not delete folder {path}: {e}")
+                
+                
+
+
+def aggregate_across_deadbands(work_dir, prefix):
+    """
+    Combine <prefix>_Control_DB*.parquet into <prefix>_Control.parquet
+    """
+
+    pattern = re.compile(
+        rf"^{re.escape(prefix)}_Control_DB(\d+)\.parquet$"
+    )
+
+    matches = []
+    for fname in os.listdir(work_dir):
+        m = pattern.match(fname)
+        if m:
+            matches.append((fname, int(m.group(1))))
+
+    if not matches:
+        print(f"⚠️ No deadband files found for {prefix}")
+        return
+
+    dfs = []
+    for fname, dbF in sorted(matches, key=lambda x: x[1]):
+        path = os.path.join(work_dir, fname)
+        df = pd.read_parquet(path)
+
+        # Enforce deadband metadata
+        df["Shed Deadband (F)"] = dbF
+        df["SourceFile"] = fname
+
+        dfs.append(df)
+
+    df_master = pd.concat(dfs, ignore_index=True)
+
+    out_path = os.path.join(work_dir, f"{prefix}_Control.parquet")
+    df_master.to_parquet(out_path, index=False)
+
+    print(
+        f"\n✅ Cross-deadband aggregation complete\n"
+        f"   Deadbands: {[db for _, db in matches]}\n"
+        f"   Rows: {len(df_master):,}\n"
+        f"   Output: {out_path}"
+    )
+
 
 #########################################
 # MAIN EXECUTION
@@ -401,62 +448,66 @@ if __name__ == "__main__":
     # Sweep deadbands
     # -----------------------------
 
+    # -----------------------------
+    # Sweep deadbands (safe aggregation)
+    # -----------------------------
     for shed_dbF in Tcontrol_dbF:
         print(f"\nRunning shed deadband = {shed_dbF} F")
     
+        all_ctrl = []
+    
         # -----------------------------
-        # Run all homes (parallel)
+        # Run all homes in parallel safely
         # -----------------------------
+        def simulate_home_safe(home_path, weather_file, sched_cfg, shed_dbF):
+            try:
+                return simulate_home(home_path, weather_file, sched_cfg, shed_dbF)
+            except Exception as e:
+                print(f"⚠️ Simulation failed for {home_path} (DB={shed_dbF}): {e}")
+                return None
+    
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = [
-                executor.submit(
-                    simulate_home,
-                    home,
-                    WEATHER_FILE,
-                    home_schedules[home],
-                    shed_dbF
-                )
+                executor.submit(simulate_home_safe, home, WEATHER_FILE, home_schedules[home], shed_dbF)
                 for home in homes
             ]
+    
             for f in concurrent.futures.as_completed(futures):
-                f.result()
+                df_result = f.result()
+                if df_result is not None:
+                    all_ctrl.append(df_result)
     
         # -----------------------------
         # Aggregate immediately
         # -----------------------------
-        all_ctrl = []
+        if all_ctrl:  # only if at least one home succeeded
+            df_all = pd.concat(all_ctrl, ignore_index=True)
+            df_all["Home"] = df_all.get("Home", "Unknown")
+            df_all["Shed Deadband (F)"] = shed_dbF
     
-        for home in homes:
-            ctrl_file = os.path.join(home, "Results", "hpwh_controlled.parquet")
-            if not os.path.exists(ctrl_file):
-                raise FileNotFoundError(f"Missing results for {home}")
+            out_file = os.path.join(
+                WORKING_DIR,
+                f"{filename}_Control_DB{int(shed_dbF)}.parquet"
+            )
+            df_all.to_parquet(out_file, index=False)
     
-            df = pd.read_parquet(ctrl_file)
-            df["Home"] = os.path.basename(home)
-            df["Shed Deadband (F)"] = shed_dbF
-            all_ctrl.append(df)
-    
-        df_all = pd.concat(all_ctrl, ignore_index=True)
-    
-        out_file = os.path.join(
-            WORKING_DIR,
-            f"{filename}_Control_DB{int(shed_dbF)}.parquet"
-        )
-    
-        df_all.to_parquet(out_file, index=False)
-    
-        print(
-            f"Aggregated DB{shed_dbF}: "
-            f"{len(df_all):,} rows, "
-            f"{df_all['Home'].nunique()} homes"
-        )
-    
+            print(
+                f"Aggregated DB{shed_dbF}: "
+                f"{len(df_all):,} rows, "
+                f"{df_all['Home'].nunique()} homes"
+            )
+        else:
+            print(f"⚠️ No successful homes to aggregate for DB{shed_dbF}")
+            
+            
+# -----------------------------
+# Cross-deadband aggregation
+# -----------------------------
+aggregate_across_deadbands(
+    work_dir=WORKING_DIR,
+    prefix=filename
+)
 
-
-    end_time = time.time()
-    execution_time = end_time - start_time
-    execution_min = execution_time/60
-    print(f"Execution time: {execution_min} minutes")
 
 
 
