@@ -30,7 +30,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_EfficiencyTest3C' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_EfficiencyControl4C2' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -47,11 +47,11 @@ t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 130 #F
-step = 7 #F
+Tcontrol_SHEDF = 123 #F
+step = 10 #F
 Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
 Tcontrol_LOADF = 130 #F
-Tcontrol_LOADdeadbandF = 7 #F
+Tcontrol_LOADdeadbandF = 2 #F
 TbaselineF = 130 #F
 TdeadbandF = 7 #F
 Tinit = 128 #F
@@ -186,11 +186,12 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         "Equipment": {
             "Water Heating": {
                 "Initial Temperature (C)": TinitC, 
-                "hp_only_mode": False, #### DANA CHANGE THIS BACK TO TRUE
+                "hp_only_mode": False,# can set to True for HP only. 
                 "Max Tank Temperature": 70,
                 "Upper Node": 3,
                 "Lower Node": 10,
                 "Upper Node Weight": 0.75,
+                "Efficiency Coefficient": 0.57, # 50 = HP only, 0 = ER only. --->  HP_DB = Tset - TDB * efficiency_coefficient 
             },
         }
     }
