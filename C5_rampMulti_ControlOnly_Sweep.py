@@ -30,7 +30,15 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_EfficiencyControl4C2' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_ControlledEfficiencyTest' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+
+# level = 9
+
+baseLVL = 9    # normal operation
+shedLVL = 1    # tighter HP window during shed (more ER fallback)
+loadLVL = 9    # more aggressive HP window during load-up (optional)
+
+
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -47,11 +55,11 @@ t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 123 #F
-step = 10 #F
+Tcontrol_SHEDF = 130 #F
+step = 7 #F
 Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
 Tcontrol_LOADF = 130 #F
-Tcontrol_LOADdeadbandF = 2 #F
+Tcontrol_LOADdeadbandF = 7 #F
 TbaselineF = 130 #F
 TdeadbandF = 7 #F
 Tinit = 128 #F
@@ -67,6 +75,14 @@ my_schedule = {
     'E_S_time': '17:00',
     'E_S_duration': 3
 }
+
+LVL = {1:0, 2:0.14, 3:0.29,
+        4:0.43, 5:0.57, 6:0.71,
+        7:1, 8:1.14, 9:10}
+
+EFF_BASELINE = LVL[baseLVL] 
+EFF_SHED = LVL[shedLVL]
+EFF_LOAD = LVL[loadLVL]
 
 
 
@@ -107,6 +123,7 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
             'Setpoint': TbaselineC,
             'Deadband': TdeadbandC,
             'Load Fraction': 1,
+            'Efficiency Coefficient': EFF_BASELINE,
         }
     }
 
@@ -126,12 +143,14 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
     if ranges['M_LU'][0] <= sim_time < ranges['M_LU'][1] or ranges['E_ALU'][0] <= sim_time < ranges['E_ALU'][1]:
         ctrl_signal['Water Heating'].update({
             'Setpoint': Tcontrol_LOADC,
-            'Deadband': Tcontrol_LOADdeadbandC
+            'Deadband': Tcontrol_LOADdeadbandC,
+            'Efficiency Coefficient': EFF_LOAD
         })
     elif ranges['M_S'][0] <= sim_time < ranges['M_S'][1] or ranges['E_S'][0] <= sim_time < ranges['E_S'][1]:
         ctrl_signal['Water Heating'].update({
             'Setpoint': Tcontrol_SHEDC,
-           'Deadband': shed_deadbandC
+           'Deadband': shed_deadbandC,
+           'Efficiency Coefficient': EFF_SHED
         })
 
     return ctrl_signal
@@ -190,8 +209,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
                 "Max Tank Temperature": 70,
                 "Upper Node": 3,
                 "Lower Node": 10,
-                "Upper Node Weight": 0.75,
-                "Efficiency Coefficient": 0.57, # 50 = HP only, 0 = ER only. --->  HP_DB = Tset - TDB * efficiency_coefficient 
+                "Upper Node Weight": 0.75,   
             },
         }
     }
@@ -207,8 +225,30 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
     hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
     for sim_time in sim_dwelling.sim_times:
+        # --- NEW: Day 1 = no control -----------------------------------------
+        if sim_time < Start + pd.Timedelta(days=1):
+            # FORCE baseline control explicitly
+            control_cmd = {
+                'Water Heating': {
+                    'Setpoint': TbaselineC,
+                    'Deadband': TdeadbandC,
+                    'Load Fraction': 1,
+                }
+            }
+            sim_dwelling.update(control_signal=control_cmd)
+            continue
+
+        # ----------------------------------------------------------------------
+        
+        
         current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-        control_cmd = determine_hpwh_control(sim_time=sim_time, current_temp_c=current_setpt, sched_cfg=schedule_cfg, shed_deadbandC=shed_deadbandC)
+        
+        control_cmd = determine_hpwh_control(sim_time=sim_time, 
+                                             current_temp_c=current_setpt, 
+                                             sched_cfg=schedule_cfg, 
+                                             shed_deadbandC=shed_deadbandC)
+        
+        
         sim_dwelling.update(control_signal=control_cmd)
     df_ctrl, _, _ = sim_dwelling.finalize()
 
@@ -324,7 +364,7 @@ def aggregate_across_deadbands(work_dir, prefix):
 
     df_master = pd.concat(dfs, ignore_index=True)
 
-    out_path = os.path.join(work_dir, f"{prefix}_Control.parquet")
+    out_path = os.path.join(work_dir, f"{prefix}.parquet")
     df_master.to_parquet(out_path, index=False)
 
     print(

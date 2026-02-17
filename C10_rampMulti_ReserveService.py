@@ -26,7 +26,13 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_Reserve20'
+filename = '180113_1_3_ReserveCanceled'
+
+
+baseLVL = 9    # normal operation
+shedLVL = 9    # tighter HP window during shed (more ER fallback)
+loadLVL = 9    # more aggressive HP window during load-up (optional)
+
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -43,9 +49,9 @@ t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 145 # 145 this is the Reserve temperature
-step = 2 # 2F
-Tcontrol_dbF = np.arange(2, 2 + step, step) #2F
+Tcontrol_SHEDF = 130 # 145 this is the Reserve temperature
+step = 7 # 2F
+Tcontrol_dbF = np.arange(7, 7 + step, step) #2F
 Tcontrol_LOADF = 123
 Tcontrol_LOADdeadbandF = 10
 TbaselineF = 130
@@ -55,14 +61,25 @@ Tinit = 128
 # Base schedule template
 my_schedule = {
     'M_LU_time': '10:00',
-    'M_LU_duration': 2,
+    'M_LU_duration': 4,
     'M_S_time': '14:00',
-    'M_S_duration': 4,
+    'M_S_duration': 0,
 }
 
 # Randomization bins
 M_LU_weights = [10, 13, 14, 16, 16, 13]  # 82 participating homes 20%
 M_LU_bins = pd.date_range("10:00", periods=len(M_LU_weights), freq="30min").strftime("%H:%M").tolist()
+
+
+LVL = {1:0, 2:0.14, 3:0.29,
+        4:0.43, 5:0.57, 6:0.71,
+        7:1, 8:1.14, 9:10}
+
+EFF_BASELINE = LVL[baseLVL] 
+EFF_SHED = LVL[shedLVL]
+EFF_LOAD = LVL[loadLVL]
+
+
 
 #########################################
 # TEMPERATURE CONVERSIONS F to C
@@ -91,6 +108,7 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
             'Setpoint': TbaselineC,
             'Deadband': TdeadbandC,
             'Load Fraction': 1,
+            'Efficiency Coefficient': EFF_BASELINE,
         }
     }
 
@@ -103,7 +121,8 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
         if start_LU <= sim_time < end_LU:
             ctrl_signal['Water Heating'].update({
                 'Setpoint': Tcontrol_LOADC,
-                'Deadband': Tcontrol_LOADdeadbandC
+                'Deadband': Tcontrol_LOADdeadbandC,
+                'Efficiency Coefficient': EFF_LOAD
             })
 
     # Shed
@@ -113,7 +132,8 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
         if start_S <= sim_time < end_S:
             ctrl_signal['Water Heating'].update({
                 'Setpoint': Tcontrol_SHEDC,
-                'Deadband': shed_deadbandC
+                'Deadband': shed_deadbandC,
+                'Efficiency Coefficient': EFF_SHED
             })
 
     return ctrl_signal
@@ -296,9 +316,9 @@ if __name__ == "__main__":
     # -----------------------------
     home_schedules = {}
     fmt = "%H:%M"
-    NUM_PARTICIPATING = 76
+    NUM_PARTICIPATING = 82
     MIN_SHED_HOURS = 1
-    SLOW_DROP_HOURS = 2
+    SLOW_DROP_HOURS = 3
 
     # Weighted pool for load-up
     M_LU_weighted_pool = [bin_time for bin_time, weight in zip(M_LU_bins, M_LU_weights) for _ in range(weight)]
@@ -309,11 +329,13 @@ if __name__ == "__main__":
     stagger_offsets = [o + random.uniform(-10/60, 10/60) for o in stagger_offsets]  # ±10 min jitter
     random.shuffle(stagger_offsets)
 
+
+# THIS IS FOR KEEP RESERVE
     for idx, home in enumerate(homes):
         sched = my_schedule.copy()
 
         # -----------------------------
-        # Participating homes: first 76
+        # RESERVE SERVICE
         # -----------------------------
         if idx < NUM_PARTICIPATING:
             # Load-up
@@ -321,12 +343,17 @@ if __name__ == "__main__":
             t_base = pd.to_datetime(M_LU_base, format=fmt)
             jitter = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
             sched['M_LU_time'] = (t_base + jitter).strftime(fmt)
-            sched['M_LU_duration'] = max(1.5, random.uniform(1.5, 3.0))
+            # sched['M_LU_duration'] = max(1.5, random.uniform(1.5, 3.0))
+            t_LU_start = pd.to_datetime(sched['M_LU_time'], format=fmt)
+            t_LU_end = pd.Timestamp("14:00")
+            
+            sched['M_LU_duration'] = max(
+                0,
+                (t_LU_end - t_LU_start).total_seconds() / 3600
+            )
 
-            # Shed: 2h minimum + staggered slow drop-off
-            t_MS_start = pd.Timestamp("14:00") + pd.Timedelta(hours=stagger_offsets[idx])
-            t_MS_start += pd.Timedelta(minutes=random.uniform(-10, 10))
-            sched['M_S_time'] = t_MS_start.strftime(fmt)
+
+            sched['M_S_time'] = "14:00"
             sched['M_S_duration'] = MIN_SHED_HOURS + stagger_offsets[idx]  # gradual drop-off
         else:
             # Non-participating: no load-up or shed
@@ -336,6 +363,46 @@ if __name__ == "__main__":
             sched['M_S_duration'] = 0
 
         home_schedules[home] = sched
+        
+# =============================================================================
+#         # -----------------------------
+#         # CANCELED RESERVE
+#         # -----------------------------
+#     
+#         if idx < NUM_PARTICIPATING:
+#             # --- Load-up start with jitter ---
+#             M_LU_base = M_LU_weighted_pool.pop()
+#             t_base = pd.to_datetime(M_LU_base, format=fmt)
+#             jitter_start = pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
+#             t_LU_start = t_base + jitter_start
+#             sched['M_LU_time'] = t_LU_start.strftime(fmt)
+#          
+#             # --- Load-up end = 14:00 + stagger offset + optional jitter ---
+#             jitter_end = pd.Timedelta(minutes=random.uniform(-10, 10))  # optional
+#             t_LU_end = pd.Timestamp(t_LU_start.date().strftime("%Y-%m-%d") + " 14:00") \
+#                        + pd.Timedelta(hours=stagger_offsets[idx]) \
+#                        + jitter_end
+#          
+#             # Make sure duration is never negative
+#             duration_hours = (t_LU_end - t_LU_start).total_seconds() / 3600
+#             sched['M_LU_duration'] = max(0, duration_hours)
+#          
+#             # --- No shed ---
+#             sched['M_S_time'] = None
+#             sched['M_S_duration'] = 0
+#          
+#         else:
+#             # Non-participating homes
+#             sched['M_LU_time'] = None
+#             sched['M_LU_duration'] = 0
+#             sched['M_S_time'] = None
+#             sched['M_S_duration'] = 0
+#          
+#         home_schedules[home] = sched
+# 
+# =============================================================================
+
+
 
     # -----------------------------
     # Sweep deadbands
