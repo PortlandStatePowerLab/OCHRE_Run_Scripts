@@ -26,7 +26,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_ReserveCanceled'
+filename = '180113_1_3_Reserve'
 
 
 baseLVL = 9    # normal operation
@@ -49,7 +49,7 @@ t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 130 # 145 this is the Reserve temperature
+Tcontrol_SHEDF = 145 # 145 this is the Reserve temperature
 step = 7 # 2F
 Tcontrol_dbF = np.arange(7, 7 + step, step) #2F
 Tcontrol_LOADF = 123

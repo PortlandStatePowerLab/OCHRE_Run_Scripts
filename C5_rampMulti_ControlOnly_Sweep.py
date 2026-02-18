@@ -30,12 +30,12 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_ControlledEfficiencyTest' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_EnergyViaEfficiencyNoShed' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 # level = 9
 
-baseLVL = 9    # normal operation
-shedLVL = 1    # tighter HP window during shed (more ER fallback)
+baseLVL = 1    # normal operation
+shedLVL = 9    # tighter HP window during shed (more ER fallback)
 loadLVL = 9    # more aggressive HP window during load-up (optional)
 
 
