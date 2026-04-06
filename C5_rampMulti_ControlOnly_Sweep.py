@@ -30,13 +30,13 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_EnergyViaEfficiencyNoShed' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180113_1_3_Reserve_L0' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
-# level = 9
+level = 8
 
-baseLVL = 1    # normal operation
-shedLVL = 9    # tighter HP window during shed (more ER fallback)
-loadLVL = 9    # more aggressive HP window during load-up (optional)
+baseLVL = level    # normal operation
+shedLVL = level    # tighter HP window during shed (more ER fallback)
+loadLVL = level    # more aggressive HP window during load-up (optional)
 
 
 
@@ -78,7 +78,7 @@ my_schedule = {
 
 LVL = {1:0, 2:0.14, 3:0.29,
         4:0.43, 5:0.57, 6:0.71,
-        7:1, 8:1.14, 9:10}
+        7:0.857, 8:1, 9:10} # 7:1, 8:1.14, 9:10
 
 EFF_BASELINE = LVL[baseLVL] 
 EFF_SHED = LVL[shedLVL]

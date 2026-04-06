@@ -29,7 +29,8 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180815_1_3_EnergyShed_122' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+
+filename = '180113_1_3_EfficiencyControl9C' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -40,17 +41,17 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 8, 15, 0, 0)
+Start = dt.datetime(2018, 1, 13, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 123 #F
-step = 8 #F
+Tcontrol_SHEDF = 130 #F
+step = 7 #F
 Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
 Tcontrol_LOADF = 130 #F
-Tcontrol_LOADdeadbandF = 2 #F
+Tcontrol_LOADdeadbandF = 7 #F
 TbaselineF = 130 #F
 TdeadbandF = 7 #F
 Tinit = 128 #F

@@ -26,12 +26,12 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_Reserve'
+filename = '180113_1_3_ReserveEff1to9'
 
 
-baseLVL = 9    # normal operation
+baseLVL = 1    # normal operation
 shedLVL = 9    # tighter HP window during shed (more ER fallback)
-loadLVL = 9    # more aggressive HP window during load-up (optional)
+loadLVL = 1    # more aggressive HP window during load-up (optional)
 
 
 # Paths
@@ -51,9 +51,9 @@ jitter_min = 5
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 145 # 145 this is the Reserve temperature
 step = 7 # 2F
-Tcontrol_dbF = np.arange(7, 7 + step, step) #2F
-Tcontrol_LOADF = 123
-Tcontrol_LOADdeadbandF = 10
+Tcontrol_dbF = np.arange(2, 7 + step, step) #2F
+Tcontrol_LOADF = 126
+Tcontrol_LOADdeadbandF = 7
 TbaselineF = 130
 TdeadbandF = 7
 Tinit = 128
