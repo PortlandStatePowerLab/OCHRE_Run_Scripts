@@ -30,9 +30,9 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180113_1_3_Reserve_L0' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_Tset120_Baseline' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
-level = 8
+level = 9
 
 baseLVL = level    # normal operation
 shedLVL = level    # tighter HP window during shed (more ER fallback)
@@ -49,20 +49,21 @@ WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
 # Simulation parameters
-Start = dt.datetime(2018, 1, 13, 0, 0)
+Start = dt.datetime(2018, 1, 10, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
-Tcontrol_SHEDF = 130 #F
+Tset = 120
+Tcontrol_SHEDF = 120 #F
 step = 7 #F
 Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
-Tcontrol_LOADF = 130 #F
+Tcontrol_LOADF = Tset #F
 Tcontrol_LOADdeadbandF = 7 #F
-TbaselineF = 130 #F
+TbaselineF = Tset #F
 TdeadbandF = 7 #F
-Tinit = 128 #F
+Tinit = Tset - 5 #F
 
 # Base schedule template
 my_schedule = {

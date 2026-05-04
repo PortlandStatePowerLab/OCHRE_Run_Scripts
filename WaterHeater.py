@@ -95,7 +95,7 @@ class WaterHeater(Equipment):
         self.lower_weight = 1.0 - self.upper_weight
         
         self.efficiency_coeff = kwargs.get('Efficiency Coefficient', 10)
-        if not (0 <= self.efficiency_coeff <= 10):
+        if not (0 <= self.efficiency_coeff <= 40):
             raise OCHREException('Efficiency Level is out of bounds.')
         
         
@@ -119,6 +119,7 @@ class WaterHeater(Equipment):
         self.setpoint_ramp_rate = kwargs.get('Max Setpoint Ramp Rate (C/min)')  # max setpoint ramp rate, in C/min
         self.deadband_temp = kwargs.get('Deadband Temperature (C)', 5.56)  # deadband range, in delta degC, i.e. Kelvin
         self.max_power = kwargs.get('Max Power (kW)')
+        self.efficiency_coeff = kwargs.get('Efficiency Coefficient', 9)
 
     def update_inputs(self, schedule_inputs=None):
         # Add zone temperature to schedule inputs for water tank
@@ -655,61 +656,136 @@ class HeatPumpWaterHeater(ElectricResistanceWaterHeater):
 # =============================================================================
         
 
+# =============================================================================
+#     def run_thermostat_control(self, use_future_states=False):
+#         """
+#         HPWH with strict deadband:
+#         - Heating only STARTS if t_control < setpoint - deadband
+#         - Once heating started, ER/HP switching is based on temperature
+#         - HP only operates in setpoint → setpoint - 3 window
+#         - ER handles below that
+#         - Heating stops once t_control >= setpoint
+#         """
+#         # Tank temperatures
+#         model_temps = self.model.states if not use_future_states else self.model.next_states
+#         t_upper = model_temps[self.t_upper_idx]
+#         t_lower = model_temps[self.t_lower_idx]
+#         t_control = self.upper_weight * t_upper + self.lower_weight * t_lower
+#     
+#         # Deadband lower limit
+#         deadband_trigger = self.setpoint_temp - self.deadband_temp
+# 
+#     
+#         # HP window
+#         hp_window_top = self.setpoint_temp
+#         hp_window_bottom = self.setpoint_temp - self.deadband_temp * self.efficiency_coeff  # <--------SET EFFICIENCY
+#         er_threshold = hp_window_bottom
+#     
+#         # ---- Initialize persistent heating flag ----
+#         if not hasattr(self, "_heating_active"):
+#             self._heating_active = False
+#     
+#         # ----  Stop heating if above setpoint ----
+#         if t_control >= self.setpoint_temp:
+#             self._heating_active = False
+#             return 'Off'
+#     
+#         # ----  Check if heating should START ---
+#         if not self._heating_active:
+#             if t_control < deadband_trigger:
+#                 self._heating_active = True
+#             else:
+#                 return 'Off'  # wait until below deadband to start heating
+#     
+#         # --- Priority 1: Heat Pump Window ---
+#         if hp_window_bottom <= t_control < hp_window_top:
+#             return 'Heat Pump On'
+#             
+#         # --- Priority 2: ER "Else" Block ---
+#         # This only runs if we are BELOW the HP window (t_control < er_threshold)
+#         # OR if we are already in an ER mode and haven't hit the setpoint yet
+#         if not self.hp_only_mode:
+#             
+#             # UPPER ELEMENT: Identical deadband logic
+#             if t_upper < er_threshold or (self.mode == 'Upper On' and t_upper < self.setpoint_temp):
+#                 return 'Upper On'
+#             
+#             # LOWER ELEMENT: Identical deadband logic
+#             # We use 'elif' so Upper always gets priority if both are cold
+#             elif t_lower < er_threshold or (self.mode == 'Lower On' and t_lower < self.setpoint_temp):
+#                 return 'Lower On'
+# 
+#         # --- Priority 3: Satisfaction ---
+#         if t_control >= self.setpoint_temp:
+#             return 'Off'
+#     
+#         # Fallback
+#         return 'Heat Pump On'
+# =============================================================================
+
+
+
+
+
+
     def run_thermostat_control(self, use_future_states=False):
         """
-        HPWH with strict deadband:
-        - Heating only STARTS if t_control < setpoint - deadband
-        - Once heating started, ER/HP switching is based on temperature
-        - HP only operates in setpoint → setpoint - 3 window
-        - ER handles below that
-        - Heating stops once t_control >= setpoint
+        Thermostat logic where:
+        - Trigger is strictly Tset - Deadband.
+        - HP territory is Tset down to Tset - (Deadband * Efficiency_Coeff).
+        - ER takes over below the HP territory.
         """
-        # Tank temperatures
         model_temps = self.model.states if not use_future_states else self.model.next_states
         t_upper = model_temps[self.t_upper_idx]
         t_lower = model_temps[self.t_lower_idx]
         t_control = self.upper_weight * t_upper + self.lower_weight * t_lower
     
-        # Deadband lower limit
-        deadband_trigger = self.setpoint_temp - self.deadband_temp
+        # --- BOUNDARIES ---
+        # The system-wide 'ON' switch
+        system_trigger = self.setpoint_temp - self.deadband_temp
         
+        # The line where we give up on the Heat Pump and switch to ER
+        hp_floor = self.setpoint_temp - (self.deadband_temp * self.efficiency_coeff)
         
-
-    
-        # HP window
-        hp_window_top = self.setpoint_temp
-        hp_window_bottom = self.setpoint_temp - self.deadband_temp * self.efficiency_coeff  # <--------SET EFFICIENCY
-    
-        # ---- Initialize persistent heating flag ----
         if not hasattr(self, "_heating_active"):
             self._heating_active = False
-    
-        # ----  Stop heating if above setpoint ----
+
+        # 1. SATISFACTION (Turn OFF)
         if t_control >= self.setpoint_temp:
             self._heating_active = False
             return 'Off'
-    
-        # ----  Check if heating should START ---
+            
+        # 2. TRIGGER (Turn ON)
+        # It ONLY turns on if it drops below the 1F (or user defined) deadband
         if not self._heating_active:
-            if t_control < deadband_trigger:
+            if t_control < system_trigger:
                 self._heating_active = True
             else:
-                return 'Off'  # wait until below deadband to start heating
-    
-        # ---- Determine heating mode once active --
-        # HP window just below setpoint
-        if hp_window_bottom <= t_control < hp_window_top:
+                return 'Off'
+                
+        # --- 3. OPERATION MODE ---
+        
+        # Priority 1: Heat Pump Window
+        # If we are above the floor, we MUST use the Heat Pump.
+        if t_control >= hp_floor or self.hp_only_mode:
             return 'Heat Pump On'
-    
-        # Else, ER handles heating
-        if not self.hp_only_mode:
+
+        # Priority 2: ER Sequence (ONLY if below the hp_floor)
+        # This section is now explicitly gated.
+        if t_control < hp_floor:
             if t_upper < self.setpoint_temp:
                 return 'Upper On'
             elif t_lower < self.setpoint_temp:
                 return 'Lower On'
-    
+        
         # Fallback
         return 'Heat Pump On'
+
+
+
+
+
+
 
 
                 
