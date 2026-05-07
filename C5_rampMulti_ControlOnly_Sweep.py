@@ -30,7 +30,7 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180110_1_3_Tset120_Baseline' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_Tset120_Shed100' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 level = 9
 
@@ -38,7 +38,9 @@ baseLVL = level    # normal operation
 shedLVL = level    # tighter HP window during shed (more ER fallback)
 loadLVL = level    # more aggressive HP window during load-up (optional)
 
-
+LVL = {1:0, 2:0.14, 3:0.29,
+        4:0.43, 5:0.57, 6:0.71,
+        7:0.857, 8:1, 9:10} # 7:1, 8:1.14, 9:10
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -56,11 +58,11 @@ jitter_min = 5
 
 # HPWH control parameters (°F)
 Tset = 120
-Tcontrol_SHEDF = 120 #F
-step = 7 #F
-Tcontrol_dbF = np.arange(7, 7 + step, step) #<------------------------------------------
+Tcontrol_SHEDF = 100 #F
+step = 5 #F
+Tcontrol_dbF = np.arange(5, 15 + step, step) #<------------------------------------------
 Tcontrol_LOADF = Tset #F
-Tcontrol_LOADdeadbandF = 7 #F
+Tcontrol_LOADdeadbandF = 2 #F
 TbaselineF = Tset #F
 TdeadbandF = 7 #F
 Tinit = Tset - 5 #F
@@ -77,9 +79,8 @@ my_schedule = {
     'E_S_duration': 3
 }
 
-LVL = {1:0, 2:0.14, 3:0.29,
-        4:0.43, 5:0.57, 6:0.71,
-        7:0.857, 8:1, 9:10} # 7:1, 8:1.14, 9:10
+
+
 
 EFF_BASELINE = LVL[baseLVL] 
 EFF_SHED = LVL[shedLVL]
