@@ -32,16 +32,6 @@ start_time = time.time()
 
 filename = '180110_1_3_TestSimulation' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
-level = 9
-
-baseLVL = 1    # normal operation
-loadLVL = 3    # load up before shed
-shedLVL = 9    # use less energy/shed
-
-
-LVL = {1:0, 2:0.14, 3:0.29,
-        4:0.43, 5:0.57, 6:0.71,
-        7:0.857, 8:1, 9:10} # 7:1, 8:1.14, 9:10
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -56,6 +46,19 @@ Start = dt.datetime(2018, 1, 10, 0, 0)
 Duration = 2  # days
 t_res = 3  # minutes
 jitter_min = 5
+
+
+level = 9 # you can set all of the base, load, shed modes at the same efficiency level
+
+baseLVL = level    # normal operation
+loadLVL = level    # load up before shed
+shedLVL = level    # use less energy/shed
+
+
+LVL = {1:0, 2:0.14, 3:0.29,
+        4:0.43, 5:0.57, 6:0.71,
+        7:0.857, 8:1, 9:10} 
+
 
 # HPWH control parameters (°F)
 Tset = 120
