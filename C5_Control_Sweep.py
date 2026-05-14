@@ -30,13 +30,14 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180110_1_3_Tset120_Shed100' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_TestSimulation' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
 
 level = 9
 
-baseLVL = level    # normal operation
-shedLVL = level    # tighter HP window during shed (more ER fallback)
-loadLVL = level    # more aggressive HP window during load-up (optional)
+baseLVL = 1    # normal operation
+loadLVL = 3    # load up before shed
+shedLVL = 9    # use less energy/shed
+
 
 LVL = {1:0, 2:0.14, 3:0.29,
         4:0.43, 5:0.57, 6:0.71,
@@ -60,7 +61,7 @@ jitter_min = 5
 Tset = 120
 Tcontrol_SHEDF = 100 #F
 step = 5 #F
-Tcontrol_dbF = np.arange(5, 15 + step, step) #<------------------------------------------
+Tcontrol_dbF = np.arange(5, 5 + step, step) #<------------------------------------------
 Tcontrol_LOADF = Tset #F
 Tcontrol_LOADdeadbandF = 2 #F
 TbaselineF = Tset #F
