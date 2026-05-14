@@ -69,8 +69,16 @@ These are some plotting scripts I used to make figures for reports/thesis.
 
 1. X1_PlotAggregated
 2. X2_PlotViolin
+    - Violin plot to show % Difference density across a 95% confidence interval
+    - Separated results from morning, evening, and full day results
 3. X3_3DPlot_95CI
+    - 3D plot script for Joe's ADMD outputs. 
 4. X4_analyzeDB
+    - Workhorse script used to disaggregate curves from aggregated results.
+    - Can plot individual day curves from non-aggregated results. 
+    - Includes narrow bar-plot above the main subplot surface to show coordination intervals
+    - iterates through label names, widths, styles, etc. 
 5. X5_singleHouse_withEfficiency
+    - This script runs a simulation for a single home, with efficiency capabilities. 
 
 
