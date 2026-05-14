@@ -188,39 +188,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, deadband_C):  # <<
     #                                          deadband_C=deadband_C)
     #     sim_dwelling.update(control_signal=control_cmd)
     
-    
-# =============================================================================
-#     for sim_time in sim_dwelling.sim_times:
-#     
-# 
-#         # --- NEW: Day 1 = no control -----------------------------------------
-#         if sim_time < Start + pd.Timedelta(days=1):
-#             # FORCE baseline control explicitly
-#             control_cmd = {
-#                 'Water Heating': {
-#                     'Setpoint': TbaselineC,
-#                     'Deadband': TdeadbandC,
-#                     'Load Fraction': 1,
-#                 }
-#             }
-#             sim_dwelling.update(control_signal=control_cmd)
-#             continue
-# 
-#         # ----------------------------------------------------------------------
-# 
-# 
-# 
-#     
-#         # Day 2 = controlled as before
-#         current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-#     
-#         control_cmd = determine_hpwh_control(sim_time=sim_time,
-#                                              current_temp_c=current_setpt,
-#                                              sched_cfg=schedule_cfg,
-#                                              deadband_C=deadband_C)
-#     
-#         sim_dwelling.update(control_signal=control_cmd)
-# =============================================================================
+
 
     for sim_time in sim_dwelling.sim_times:
 

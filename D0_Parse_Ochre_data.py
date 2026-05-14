@@ -21,10 +21,10 @@ def convert_custom_datetime(series):
 
 # enter in the input and output file names. 
 
-WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
+WORKING_DIR = r"C:\Users\danap\OCHRE_Working" # change this to your working directory
   
-input_file_name  = "180117_2_15_RCJ_Baseline.csv"
-output_file_name  = "D0_180117_2_15_RCJ_Baseline.csv"
+input_file_name  = "180117_2_15_RCJ_Baseline.csv"  # change this to your source file
+output_file_name  = "D0_180117_2_15_RCJ_Baseline.csv"  # this will be your output file
 
 input_file_name = os.path.join(WORKING_DIR, input_file_name)
 output_file_name = os.path.join(WORKING_DIR, output_file_name)

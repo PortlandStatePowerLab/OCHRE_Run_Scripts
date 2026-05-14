@@ -30,10 +30,15 @@ start_time = time.time()
 # USER SETTINGS
 #########################################
 
-filename = '180110_1_3_TestSimulation' # date that's thrown away, num of simulation days, data res, ramp or no ramp control
+filename = '180110_1_3_TestSimulation' # date that's thrown away, num of simulation days, data res, filename identifier
 
 
-# Paths
+"""
+Dana says:
+    
+    Update your paths!
+
+"""
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
 DEFAULT_WEATHER = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Weather\USA_OR_Portland.Intl.AP.726980_TMY3.epw"
 WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
@@ -41,6 +46,21 @@ INPUT_DIR = os.path.join(WORKING_DIR, "Input Files")
 WEATHER_DIR = os.path.join(WORKING_DIR, "Weather")
 WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.epw")
 
+
+
+"""
+Dana says:
+    
+    Enter your simulation start time, duration,
+    time-step resolution, and randomization jitter.
+    
+    The first simulation day will be thrown away, because
+    all the WHs and thermal layers will start in the same state.
+    Throwing away the first day allows for full randomization of states
+    starting at beginning of next day simulation.
+
+
+"""
 # Simulation parameters
 Start = dt.datetime(2018, 1, 10, 0, 0)
 Duration = 2  # days
@@ -48,41 +68,88 @@ t_res = 3  # minutes
 jitter_min = 5
 
 
-level = 9 # you can set all of the base, load, shed modes at the same efficiency level
+#########################################
+# EFFICIENCY LEVEL SETTINGS
+#########################################
 
-baseLVL = level    # normal operation
-loadLVL = level    # load up before shed
-shedLVL = level    # use less energy/shed
+"""
+Dana says:
+    Efficiency Levels will probably be the same for all CTA-2045 commands, but
+    I thought it might be interesting to add these as controllers for potential
+    energy shifting by flexing efficiency. The library is changing the HP
+    deadband width from 0F to the full range. The HP operating region is
+    calculated with
+    
+    
+    HP operating region:
+    HPupper = Tset
+    HPlower = Tset - TbaselineDB * efficiency_coefficient
+    
+    Below this region will be ER operation.
+
+"""
+
+baseLVL = 1    # normal operation
+loadLVL = 1    # load up before shed
+shedLVL = 1    # use less energy/shed
 
 
-LVL = {1:0, 2:0.14, 3:0.29,
+LVL = {1:0, 2:0.14, 3:0.29, # Efficiency Level library
         4:0.43, 5:0.57, 6:0.71,
         7:0.857, 8:1, 9:10} 
 
 
-# HPWH control parameters (°F)
-Tset = 120
-Tcontrol_SHEDF = 100 #F
+# HPWH control parameters in F
+"""
+Dana says:
+    
+    This is where you put your control temperatures.
+    If you want to run an uncontrolled simulation, set all the setpoints
+    and deadbands to each other. For example,
+    
+    Tset = Tshed_F = Tloadup_F = TbaselineF
+    TShed_DBF = Tloadup_DBF = Tbaseline_DBF
+
+
+"""
+Tset = 130 # F
+
+Tshed_F = 120 #F
 step = 5 #F
-Tcontrol_dbF = np.arange(5, 5 + step, step) #<------------------------------------------
-Tcontrol_LOADF = Tset #F
-Tcontrol_LOADdeadbandF = 2 #F
+TShed_DBF = np.arange(5, 10 + step, step) # Sweep Shed-type deadband. Set Start/Stop value to same number if you only want one run w/o sweeping.
+
+Tloadup_F = Tset #F
+Tloadup_DBF = 2 #F
+
 TbaselineF = Tset #F
-TdeadbandF = 7 #F
+Tbaseline_DBF = 7 #F
+
 Tinit = Tset - 5 #F
+
+
+
+
+"""
+This is the schedule for morning and evening events, typical of an
+Energy type grid service.
+
+ALU was carried over from someone elses project who used Advanced Load up
+during evening event periods. I bet that could be done again, but youd need to
+add that input and capability separately.
+"""
+
 
 # Base schedule template
 my_schedule = {
-    'M_LU_time': '03:00',
-    'M_LU_duration': 3,
-    'M_S_time': '06:00',
-    'M_S_duration': 4,
-    'E_ALU_time': '16:00',
-    'E_ALU_duration': 1,
-    'E_S_time': '17:00',
-    'E_S_duration': 3
+    'M_LU_time': '03:00',   # morning loadup time
+    'M_LU_duration': 3,     # morning loadup duration
+    'M_S_time': '06:00',    # morning shed time
+    'M_S_duration': 4,      # morning shed duration
+    'E_ALU_time': '16:00',  # evening loadup time
+    'E_ALU_duration': 1,    # evening loadup duration
+    'E_S_time': '17:00',    # evening shed time
+    'E_S_duration': 3       # evening shed duration
 }
-
 
 
 
@@ -91,6 +158,21 @@ EFF_SHED = LVL[shedLVL]
 EFF_LOAD = LVL[loadLVL]
 
 
+"""
+Dana says:
+
+    These are randomization bins. Each of the 409 samples pick a time to 
+    load up for morning and evening periods. The shed bins are in the run
+    section of the code. This is not organized nicely, I'm sorry!!
+    
+    As you can see, some of it is hard coded (the 3:00, 14:00 start times).
+    
+    This could be more cute, but I did not have time. 
+    
+    The bins are separated into 15-minute intervals, starting at 3:00, meaning
+    (14) at 3:00, (28) at 3:15, (34) at 3:30, etc.
+
+"""
 
 # Randomization bins
 M_LU_weights = [14, 28, 34, 41, 46, 46, 41, 33, 30, 31, 35, 30]
@@ -111,12 +193,12 @@ def f_to_c(temp_f):
 def f_to_c_DB(temp_f):
     return 5/9 * temp_f
 
-Tcontrol_SHEDC = f_to_c(Tcontrol_SHEDF)
-# Tcontrol_deadbandC = Tcontrol_dbF * 5/9
-Tcontrol_LOADC = f_to_c(Tcontrol_LOADF)
-Tcontrol_LOADdeadbandC = f_to_c_DB(Tcontrol_LOADdeadbandF)
+TShed_C = f_to_c(Tshed_F)
+# Tcontrol_deadbandC = TShed_DBF * 5/9
+Tloadup_C = f_to_c(Tloadup_F)
+Tloadup_DBC = f_to_c_DB(Tloadup_DBF)
 TbaselineC = f_to_c(TbaselineF)
-TdeadbandC = f_to_c_DB(TdeadbandF)
+Tbaseline_DBC = f_to_c_DB(Tbaseline_DBF)
 TinitC = f_to_c(Tinit)
 
 #########################################
@@ -127,7 +209,7 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
     ctrl_signal = {
         'Water Heating': {
             'Setpoint': TbaselineC,
-            'Deadband': TdeadbandC,
+            'Deadband': Tbaseline_DBC,
             'Load Fraction': 1,
             'Efficiency Coefficient': EFF_BASELINE,
         }
@@ -148,13 +230,13 @@ def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, 
 
     if ranges['M_LU'][0] <= sim_time < ranges['M_LU'][1] or ranges['E_ALU'][0] <= sim_time < ranges['E_ALU'][1]:
         ctrl_signal['Water Heating'].update({
-            'Setpoint': Tcontrol_LOADC,
-            'Deadband': Tcontrol_LOADdeadbandC,
+            'Setpoint': Tloadup_C,
+            'Deadband': Tloadup_DBC,
             'Efficiency Coefficient': EFF_LOAD
         })
     elif ranges['M_S'][0] <= sim_time < ranges['M_S'][1] or ranges['E_S'][0] <= sim_time < ranges['E_S'][1]:
         ctrl_signal['Water Heating'].update({
-            'Setpoint': Tcontrol_SHEDC,
+            'Setpoint': TShed_C,
            'Deadband': shed_deadbandC,
            'Efficiency Coefficient': EFF_SHED
         })
@@ -207,15 +289,15 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         "hpxml_file": hpxml_file,
         "hpxml_schedule_file": filtered_sched_file,
         "weather_file": weather_file_path,
-        "verbosity": 7,
+        "verbosity": 7,     # look at the ochre docs
         "Equipment": {
             "Water Heating": {
                 "Initial Temperature (C)": TinitC, 
-                "hp_only_mode": False,# can set to True for HP only. 
-                "Max Tank Temperature": 70,
-                "Upper Node": 3,
-                "Lower Node": 10,
-                "Upper Node Weight": 0.75,   
+                "hp_only_mode": False,      # can set to True for HP only, but that disables Efficiency Level capability.
+                "Max Tank Temperature": 70, # set pretty high because it uses any layer temperature
+                "Upper Node": 3,            # this is NRELs number
+                "Lower Node": 10,           # this one too
+                "Upper Node Weight": 0.75,  # this one as well
             },
         }
     }
@@ -223,7 +305,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     # # Baseline
     # base_dwelling = Dwelling(name="HPWH Baseline", **dwelling_args_local)
     # for t_base in base_dwelling.sim_times:
-    #     base_ctrl = {"Water Heating": {"Setpoint": TbaselineC, "Deadband": TdeadbandC, "Load Fraction": 1}}
+    #     base_ctrl = {"Water Heating": {"Setpoint": TbaselineC, "Deadband": Tbaseline_DBC, "Load Fraction": 1}}
     #     base_dwelling.update(control_signal=base_ctrl)
     # df_base, _, _ = base_dwelling.finalize()
 
@@ -237,7 +319,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
             control_cmd = {
                 'Water Heating': {
                     'Setpoint': TbaselineC,
-                    'Deadband': TdeadbandC,
+                    'Deadband': Tbaseline_DBC,
                     'Load Fraction': 1,
                 }
             }
@@ -282,8 +364,6 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         os.path.join(results_dir, f'hpwh_controlled.parquet'),
         index=False
     )
-
-    # cleanup_results_dir(results_dir, keep_files=['hpwh_baseline.parquet', 'hpwh_controlled.parquet'])
 
     return df_ctrl
 
@@ -409,6 +489,15 @@ if __name__ == "__main__":
     home_schedules = {}
     fmt = "%H:%M"
 
+
+    """
+    Dana says:
+        This is the other bins for shed-type coordination.
+        This assigns homes unique schedules following the bin coordination. 
+        You can play with the bin weights, so long as the sum = # of homes.
+    
+    """
+
     # Weighted pools
     M_LU_weighted_pool = [bin_time for bin_time, weight in zip(M_LU_bins, M_LU_weights) for _ in range(weight)]
     random.shuffle(M_LU_weighted_pool)
@@ -428,7 +517,7 @@ if __name__ == "__main__":
     ES_weighted_pool = [offset2 for offset2, m in zip(ES_offsets, ES_weights) for _ in range(m)]
     random.shuffle(ES_weighted_pool)
 
-    # Assign schedules
+    # Assign schedules according to bins
     for home in homes:
         sched = my_schedule.copy()
 
@@ -491,14 +580,21 @@ if __name__ == "__main__":
         # Save schedule
         home_schedules[home] = sched
 
-    # -----------------------------
-    # Sweep deadbands
-    # -----------------------------
 
     # -----------------------------
-    # Sweep deadbands (safe aggregation)
+    # Sweep deadbands 
     # -----------------------------
-    for shed_dbF in Tcontrol_dbF:
+    """
+    Dana says:
+        
+        This sweeps through the shed deadbands. It'll only run once if you're
+        running a mock baseline. The output will be two files:
+            1. one per deadband
+            2. aggregated file inclusive of each deadband
+    
+    """
+    
+    for shed_dbF in TShed_DBF:
         print(f"\nRunning shed deadband = {shed_dbF} F")
     
         all_ctrl = []

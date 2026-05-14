@@ -50,10 +50,6 @@
 ### ADMD scripts (Joe), Results plotter (Dana)
 
 These scripts are used to run a Monte Carlo Simulation for any aggregated load CSV file (can be changed to parquet).
-1. Upload original results CSV file to D0
-2. Upload results of D0 and run it in D1. This will take a while (10s of minutes) depending on Unit Runs (N-loads) and MCS Runs (currently set to 1000).
-3. The resultant file can be used in any of the D2/D3 files for plotting the results. Plotting files could use some work to make data input less hardcode-y.
-
     - D0_Parse_Ochre_data.py
     - D1_Get_ADMD_data.py
     - D2_Plot_3D_ADMD.py or
@@ -62,5 +58,19 @@ These scripts are used to run a Monte Carlo Simulation for any aggregated load C
     - D3_Plot_Time_N.py
 
 
-### Plotting scripts
+1. Upload original results CSV file to D0
+2. Upload results of D0 and run it in D1. This will take a while (10s of minutes) depending on Unit Runs (N-loads) and MCS Runs (currently set to 1000).
+3. The resultant file can be used in any of the D2/D3 files for plotting the results. Plotting files could use some work to make data input less hardcode-y.
+
+
+### Plotting scripts (Dana)
+
+These are some plotting scripts I used to make figures for reports/thesis. 
+
+1. X1_PlotAggregated
+2. X2_PlotViolin
+3. X3_3DPlot_95CI
+4. X4_analyzeDB
+5. X5_singleHouse_withEfficiency
+
 

@@ -28,10 +28,10 @@ print('Processing...')
 
 WORKING_DIR = r"C:\Users\danap\OCHRE_Working"
   
-input_file_name  = "D0_180117_2_15_RCJ.csv"
-ninety_fifth_output_file  = "D1b_180117_2_15_RCJ_95.csv"
-mean_output_file  = "D1b_180117_2_15_RCJ_Mean.csv"
-fifth_output_file  = "D1b_180117_2_15_RCJ_5.csv"
+input_file_name  = "D0_180117_2_15_RCJ.csv" # input file from D1 results
+ninety_fifth_output_file  = "D1b_180117_2_15_RCJ_95.csv" # one output file
+mean_output_file  = "D1b_180117_2_15_RCJ_Mean.csv" # another output file
+fifth_output_file  = "D1b_180117_2_15_RCJ_5.csv" # another another output file
 
 
 input_file_name = os.path.join(WORKING_DIR, input_file_name)
@@ -41,8 +41,9 @@ fifth_output_file = os.path.join(WORKING_DIR, fifth_output_file)
 
 
 
-unit_runs = 500
-MCS_runs = 1000  # this method 02 is much faster
+unit_runs = 500  # pick the number of units. results will be inclusive of all loads below this number as well.
+MCS_runs = 1000  # mcs = 1000 is standard
+rated_power = 0.5 # kw
 
 ############################################################################
 #                        FUNCTIONS                                         #
@@ -95,6 +96,7 @@ def get_stats(input_df):
     sorted_idx = total_load.sort_values().index
 
     # Compute indices for 5th and 95th percentiles
+    # We changed this to be the 95th percentile which is 2.5th to 97.5th
     i5 = int(0.025 * len(sorted_idx))
     i95 = int(0.975 * len(sorted_idx)) - 1
 
@@ -141,7 +143,7 @@ fifth_df        = pd.DataFrame(np.nan, index=range(unit_runs), columns=times)
 for i, N in enumerate(np.arange(1, unit_runs+1)):
     # get the table that contains each MCS run 
     MCS_table = get_MCS_run(N, df)
-    MCS_table = MCS_table.div(0.5 * N) 
+    MCS_table = MCS_table.div(rated_power * N) 
     
     # find the 95th, mean, 5th percentile values at each time step
     stats_df = get_stats(MCS_table)
