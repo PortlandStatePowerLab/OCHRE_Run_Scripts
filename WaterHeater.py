@@ -16,13 +16,13 @@ from ochre.Models import OneNodeWaterModel, TwoNodeWaterModel, StratifiedWaterMo
 class WaterHeater(Equipment):
     name = 'Water Heater'
     end_use = 'Water Heating'
-    default_capacity = 4500  # in W
+    default_capacity = 4500  # Rated power in W
     optional_inputs = [
         "Water Heating Setpoint (C)",
         "Water Heating Deadband (C)",
         "Water Heating Max Power (kW)",
         "Zone Temperature (C)",  # Needed for Water tank model
-        'Efficiency Coefficient',
+        'Efficiency Coefficient', # Dana added this to adjust Efficiency Level
     ]  
     
     def __init__(self, use_ideal_capacity=None, model_class=None, **kwargs):
@@ -57,18 +57,9 @@ class WaterHeater(Equipment):
 #         Dana is editing this section so that we can try and 
 #         edit the upper and lower layer selection
 # =============================================================================
-
-        # # Get tank nodes for upper and lower heat injections
-        # upper_node = '3' if self.model.n_nodes >= 12 else '1' # 3 is original 
-        # self.t_upper_idx = self.model.state_names.index('T_WH' + upper_node)
-        # self.h_upper_idx = self.model.input_names.index('H_WH' + upper_node) - self.model.h_1_idx
-
-        # lower_node = '10' if self.model.n_nodes >= 12 else str(self.model.n_nodes) # 10 is original 
-        # self.t_lower_idx = self.model.state_names.index('T_WH' + lower_node)
-        # self.h_lower_idx = self.model.input_names.index('H_WH' + lower_node) - self.model.h_1_idx
         
         
-        # Allow user to override upper and lower node selections
+        # Dana says: Allow user to override upper and lower node selections
         upper_node = kwargs.get('Upper Node', '3' if self.model.n_nodes >= 12 else '1')
         lower_node = kwargs.get('Lower Node', '10' if self.model.n_nodes >= 12 else str(self.model.n_nodes))
         
@@ -87,15 +78,35 @@ class WaterHeater(Equipment):
         self.t_lower_idx = self.model.state_names.index('T_WH' + lower_node)
         self.h_lower_idx = self.model.input_names.index('H_WH' + lower_node) - self.model.h_1_idx
 
-        # Allow user to control weighting: upper node weight, lower node = 1 - upper
+
+        """
+        Dana says:
+        
+        Allow user to control weighting: upper node weight, lower node = 1 - upper
+        The given weights have been tested by NREL, but we can adjust if we'd like to improve Ttank/Tcontrol
+        Coefficients follow Tcontrol equation for
+        Tcontrol = upper_weight * upper_node + lower_weight * lower_node
+        
+        """
         self.upper_weight = kwargs.get('Upper Node Weight', 0.25)
         if not (0.0 <= self.upper_weight <= 1.0):
             raise OCHREException("Upper Node Weight must be between 0 and 1")
         
-        self.lower_weight = 1.0 - self.upper_weight
+        self.lower_weight = 1.0 - self.upper_weight # upper_weight + lower_weight = 1
         
+
+        """
+        Dana says:
+        
+        Set Efficiency Coefficient, which is different from Efficiency Level.
+        Efficiency Levels are integer states, called via library to set coefficients, such that
+        
+        heatpump_deadband_width = Tset - DB * efficiency_coefficient
+        
+        
+        """
         self.efficiency_coeff = kwargs.get('Efficiency Coefficient', 10)
-        if not (0 <= self.efficiency_coeff <= 40):
+        if not (0 <= self.efficiency_coeff <= 50):
             raise OCHREException('Efficiency Level is out of bounds.')
         
         
@@ -638,140 +649,64 @@ class HeatPumpWaterHeater(ElectricResistanceWaterHeater):
 # =============================================================================
 
 
-################# dana delete this and uncomment out the thing above this ##########################
-
-# =============================================================================
-# 
-#         # Allow user to override upper and lower node selections
-#         upper_node = kwargs.get('Upper Node', '3' if self.model.n_nodes >= 12 else '1')
-#         lower_node = kwargs.get('Lower Node', '10' if self.model.n_nodes >= 12 else str(self.model.n_nodes))
-#         
-#         # Validate and convert to string in case integers are passed
-#         upper_node = str(upper_node)
-#         lower_node = str(lower_node)
-#         
-#         # Store for later if needed
-#         self.upper_node = upper_node
-#         self.lower_node = lower_node
-# =============================================================================
-        
-
-# =============================================================================
-#     def run_thermostat_control(self, use_future_states=False):
-#         """
-#         HPWH with strict deadband:
-#         - Heating only STARTS if t_control < setpoint - deadband
-#         - Once heating started, ER/HP switching is based on temperature
-#         - HP only operates in setpoint → setpoint - 3 window
-#         - ER handles below that
-#         - Heating stops once t_control >= setpoint
-#         """
-#         # Tank temperatures
-#         model_temps = self.model.states if not use_future_states else self.model.next_states
-#         t_upper = model_temps[self.t_upper_idx]
-#         t_lower = model_temps[self.t_lower_idx]
-#         t_control = self.upper_weight * t_upper + self.lower_weight * t_lower
-#     
-#         # Deadband lower limit
-#         deadband_trigger = self.setpoint_temp - self.deadband_temp
-# 
-#     
-#         # HP window
-#         hp_window_top = self.setpoint_temp
-#         hp_window_bottom = self.setpoint_temp - self.deadband_temp * self.efficiency_coeff  # <--------SET EFFICIENCY
-#         er_threshold = hp_window_bottom
-#     
-#         # ---- Initialize persistent heating flag ----
-#         if not hasattr(self, "_heating_active"):
-#             self._heating_active = False
-#     
-#         # ----  Stop heating if above setpoint ----
-#         if t_control >= self.setpoint_temp:
-#             self._heating_active = False
-#             return 'Off'
-#     
-#         # ----  Check if heating should START ---
-#         if not self._heating_active:
-#             if t_control < deadband_trigger:
-#                 self._heating_active = True
-#             else:
-#                 return 'Off'  # wait until below deadband to start heating
-#     
-#         # --- Priority 1: Heat Pump Window ---
-#         if hp_window_bottom <= t_control < hp_window_top:
-#             return 'Heat Pump On'
-#             
-#         # --- Priority 2: ER "Else" Block ---
-#         # This only runs if we are BELOW the HP window (t_control < er_threshold)
-#         # OR if we are already in an ER mode and haven't hit the setpoint yet
-#         if not self.hp_only_mode:
-#             
-#             # UPPER ELEMENT: Identical deadband logic
-#             if t_upper < er_threshold or (self.mode == 'Upper On' and t_upper < self.setpoint_temp):
-#                 return 'Upper On'
-#             
-#             # LOWER ELEMENT: Identical deadband logic
-#             # We use 'elif' so Upper always gets priority if both are cold
-#             elif t_lower < er_threshold or (self.mode == 'Lower On' and t_lower < self.setpoint_temp):
-#                 return 'Lower On'
-# 
-#         # --- Priority 3: Satisfaction ---
-#         if t_control >= self.setpoint_temp:
-#             return 'Off'
-#     
-#         # Fallback
-#         return 'Heat Pump On'
-# =============================================================================
-
-
-
-
 
 
     def run_thermostat_control(self, use_future_states=False):
         """
-        Thermostat logic where:
-        - Trigger is strictly Tset - Deadband.
-        - HP territory is Tset down to Tset - (Deadband * Efficiency_Coeff).
-        - ER takes over below the HP territory.
+        Dana says:
+        
+        Applying Efficiency Level to heatin glogic:
+        - WH will only heat if temperature drops below deadband at temperature
+        
+            trigger = Tset - Deadband
+            
+        - HP deadband is from Tset to Tset - (Deadband * Efficiency_Coeff)
+            Efficiency Coefficient adjusts HP deadband width
+        - ER will heat in ELSE case, below the HP lower temperature threshold.
+        
+        
+        Dana made adjustments to NRELs code, which did not return a representative
+        EnergyTake to 0Wh. NRELs own notes said it still needed to validate control logic.
         """
         model_temps = self.model.states if not use_future_states else self.model.next_states
-        t_upper = model_temps[self.t_upper_idx]
-        t_lower = model_temps[self.t_lower_idx]
-        t_control = self.upper_weight * t_upper + self.lower_weight * t_lower
+        t_upper = model_temps[self.t_upper_idx] # get upper sensor layer location
+        t_lower = model_temps[self.t_lower_idx] # get lower sensor layer location
+        t_control = self.upper_weight * t_upper + self.lower_weight * t_lower # define control temperature, used in EnergyTake calcs.
     
-        # --- BOUNDARIES ---
-        # The system-wide 'ON' switch
+        
+        # Only start heating if below this temperature threshold, then employ logic
         system_trigger = self.setpoint_temp - self.deadband_temp
         
-        # The line where we give up on the Heat Pump and switch to ER
+        # The line where we switch from HP to ER. This defines HP lower temperature threshold
         hp_floor = self.setpoint_temp - (self.deadband_temp * self.efficiency_coeff)
         
+        
+        # If device is not actively heating, make sure it stays in that mode, 
+        # unless triggered by following logic
         if not hasattr(self, "_heating_active"):
             self._heating_active = False
 
-        # 1. SATISFACTION (Turn OFF)
+        # 1. If temp at Tset, turn heating OFF
         if t_control >= self.setpoint_temp:
             self._heating_active = False
             return 'Off'
             
-        # 2. TRIGGER (Turn ON)
-        # It ONLY turns on if it drops below the 1F (or user defined) deadband
+        # 2. If below trigger temperature, turn heating ON
         if not self._heating_active:
             if t_control < system_trigger:
                 self._heating_active = True
             else:
                 return 'Off'
                 
-        # --- 3. OPERATION MODE ---
+        # WHILE ON
         
-        # Priority 1: Heat Pump Window
-        # If we are above the floor, we MUST use the Heat Pump.
+        # HP Window
+        # If in HP window, use HP.
         if t_control >= hp_floor or self.hp_only_mode:
             return 'Heat Pump On'
 
-        # Priority 2: ER Sequence (ONLY if below the hp_floor)
-        # This section is now explicitly gated.
+        # ER window
+        # If below HP window, use ER
         if t_control < hp_floor:
             if t_upper < self.setpoint_temp:
                 return 'Upper On'
@@ -782,14 +717,6 @@ class HeatPumpWaterHeater(ElectricResistanceWaterHeater):
         return 'Heat Pump On'
 
 
-
-
-
-
-
-
-                
-    ######################## DANA DELETE THIS #########################
 
 
     def update_internal_control(self):
@@ -878,16 +805,25 @@ class HeatPumpWaterHeater(ElectricResistanceWaterHeater):
     #         results[f'{self.end_use} Heat Pump COP (-)'] = self.hp_cop
     #     return results
     
-    
-# =============================================================================
-#     Dana edited this section to include a column for Tcontrol so that the controller tells the heating
-#     elements to turn on or off according to the upper and lower threshold values. 
-#     
-#     This temperature is taking sections of the tank temperature as defined above, and using weighted
-#     values to determine overall Ttank (as defined by our previous work)
-# =============================================================================
+
     
     def generate_results(self):
+        
+        """
+        Dana edited this section to include a column for Tcontrol and 
+        individual node/layer temperatures.
+        
+        Tcontrol is used to determine heating logic, and can also be used
+        to calculate EnergyTake for future work. 
+        
+        Individual layers are also added to results if future work wants to
+        adjust temperature sensor location, plot layer temperature dynamics,
+        etc.
+        
+        
+        """
+        
+        
         results = super().generate_results()
         
         if self.verbosity >= 7:
@@ -899,6 +835,7 @@ class HeatPumpWaterHeater(ElectricResistanceWaterHeater):
             # Get tank node temperatures
             tank_temps = self.model.states
     
+            # Add tank node temperature to generated results CSV/parquet
             for i in range(len(tank_temps)):
                 results[f'{self.end_use} Tank Temperature Node {i+1} (C)'] = tank_temps[i]
     
