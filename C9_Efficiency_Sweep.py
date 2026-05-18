@@ -25,7 +25,6 @@ start_time = time.time()
 #########################################
 # USER SETTINGS
 #########################################
-# Base prefix for output files
 filename_base = '180113_1_3_EffSweep' 
 
 # Paths
@@ -65,9 +64,10 @@ my_schedule = {
 }
 
 # Efficiency Map
-LVL = {1:0, 2:0.14, 3:0.29, 4:0.43, 5:0.57, 6:0.71, 7:0.857, 8:1, 9:10}
+# LVL = {1:0, 2:0.14, 3:0.29, 4:0.43, 5:0.57, 6:0.71, 7:0.857, 8:1, 9:10} # linear db width
+LVL = {1:0, 3:0.34, 4:0.6, 5:0.88, 6:1.02, 7:1.05, 8:1.35, 9:10} # linear marginal load 
 
-# Global Placeholders (Updated in loop)
+# Global Placeholders
 EFF_BASELINE = 0
 EFF_SHED = 0
 EFF_LOAD = 0
@@ -96,7 +96,6 @@ TdeadbandC = f_to_c_DB(TdeadbandF)
 TinitC = f_to_c(Tinit)
 
 def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, **kwargs):
-    # Uses the current global EFF values
     ctrl_signal = {
         'Water Heating': {
             'Setpoint': TbaselineC,
@@ -175,7 +174,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         "hpxml_file": hpxml_file,
         "hpxml_schedule_file": filtered_sched_file,
         "weather_file": weather_file_path,
-        "verbosity": 1, # Lowered for speed
+        "verbosity": 1,
         "Equipment": {
             "Water Heating": {
                 "Initial Temperature (C)": TinitC, 
@@ -188,15 +187,12 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         }
     }
 
-
-    
+    # Catching generic Exception covers internal XML formatting issues (like missing Pool Pumps)
     try:
         sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
-    except OCHREException as e:
-        print(f"Skipping building due to error: {e}")
-        return None # Or however your concurrent.futures handles skips
-    
-    
+    except Exception as e:
+        print(f"❌ Skipping building {os.path.basename(home_path)} due to error: {e}")
+        return None
     
     hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
     
@@ -218,13 +214,24 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     return df_ctrl[[c for c in cols_to_keep if c in df_ctrl.columns]]
 
 def aggregate_across_deadbands(work_dir, prefix):
-    pattern = re.compile(rf"^{re.escape(prefix)}_Control_DB(\d+)\.parquet$")
-    matches = [(f, int(pattern.match(f).group(1))) for f in os.listdir(work_dir) if pattern.match(f)]
-    if not matches: return
+    # Regex updated to explicitly match the pattern outputted by our loops below
+    pattern = re.compile(rf"^EfficiencyLevel{re.escape(prefix)}_DB(\d+)_LinearMarginal\.parquet$")
+    
+    matches = []
+    for f in os.listdir(work_dir):
+        match = pattern.match(f)
+        if match:
+            matches.append((f, int(match.group(1))))
+            
+    if not matches: 
+        print(f"⚠️ No deadband files found to aggregate for prefix: {prefix}")
+        return
 
+    # Sort files sequentially by deadband value
     dfs = [pd.read_parquet(os.path.join(work_dir, f)) for f, db in sorted(matches, key=lambda x: x[1])]
     df_master = pd.concat(dfs, ignore_index=True)
-    out_path = os.path.join(work_dir, f"{prefix}_FULL_LEVEL.parquet")
+    
+    out_path = os.path.join(work_dir, f"EfficiencyLevel{prefix}_FULL_LEVEL.parquet")
     df_master.to_parquet(out_path, index=False)
     print(f"✅ Aggregated Level {prefix} to {out_path}")
 
@@ -236,7 +243,6 @@ if __name__ == "__main__":
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(WEATHER_DIR, exist_ok=True)
 
-    # 1. Setup Input Files
     for item in os.listdir(DEFAULT_INPUT):
         src, dst = os.path.join(DEFAULT_INPUT, item), os.path.join(INPUT_DIR, item)
         if os.path.isdir(src) and not os.path.exists(dst): shutil.copytree(src, dst)
@@ -244,11 +250,9 @@ if __name__ == "__main__":
 
     homes = find_all_homes(INPUT_DIR)
     
-    # 2. Assign Constant Schedules
     home_schedules = {}
     fmt = "%H:%M"
     
-    # Pools
     M_LU_weighted_pool = [b for b, w in zip(M_LU_bins, M_LU_weights) for _ in range(w)]
     E_ALU_weighted_pool = [b for b, w in zip(E_ALU_bins, E_ALU_weights) for _ in range(w)]
     random.shuffle(M_LU_weighted_pool)
@@ -256,30 +260,25 @@ if __name__ == "__main__":
 
     for home in homes:
         sched = my_schedule.copy()
-        # M_LU logic
         t_base = pd.to_datetime(M_LU_weighted_pool.pop() if M_LU_weighted_pool else random.choice(M_LU_bins), format=fmt)
         sched['M_LU_time'] = (t_base + pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))).strftime(fmt)
         
-        # M_S Logic
         t_ms_start = pd.to_datetime(my_schedule['M_S_time'], format=fmt) + pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))
         sched['M_S_time'] = t_ms_start.strftime(fmt)
         
-        # Duration logic
         t_mlu_start = pd.to_datetime(sched['M_LU_time'], format=fmt)
         diff = (t_ms_start - t_mlu_start).total_seconds() / 3600
         sched['M_LU_duration'] = max(1, diff if diff > 0 else diff + 24)
-        sched['M_S_duration'] = 4 + random.uniform(0, 3) # Simplified example
+        sched['M_S_duration'] = 4 + random.uniform(0, 3)
 
-        # E_ALU logic
         t_e_alu_base = pd.to_datetime(E_ALU_weighted_pool.pop() if E_ALU_weighted_pool else random.choice(E_ALU_bins), format=fmt)
         sched['E_ALU_time'] = (t_e_alu_base + pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))).strftime(fmt)
         home_schedules[home] = sched
 
     # 3. SWEEP LEVELS 1-9
-    for current_lvl in range(1, 10):
+    for current_lvl in sorted(LVL.keys()):
         print(f"\n>>> LEVEL {current_lvl} (Coeff: {LVL[current_lvl]})")
         
-        # Update Globals
         EFF_BASELINE = EFF_SHED = EFF_LOAD = LVL[current_lvl]
         lvl_prefix = f"{filename_base}_L{current_lvl}"
 
@@ -295,7 +294,8 @@ if __name__ == "__main__":
             
             if all_results:
                 df_lvl_db = pd.concat(all_results, ignore_index=True)
-                out_name = os.path.join(WORKING_DIR, f"EffBaseline_Level{lvl_prefix}.parquet")
+                # Modified naming convention here to distinctively match the deadband number
+                out_name = os.path.join(WORKING_DIR, f"EfficiencyLevel{lvl_prefix}_DB{shed_dbF}_LinearMarginal.parquet")
                 df_lvl_db.to_parquet(out_name, index=False)
 
         # 5. Aggregate Level
