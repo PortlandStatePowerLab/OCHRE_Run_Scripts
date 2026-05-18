@@ -114,12 +114,12 @@ Dana says:
 """
 Tset = 130 # F
 
-Tshed_F = 120 #F
-step = 5 #F
-TShed_DBF = np.arange(5, 10 + step, step) # Sweep Shed-type deadband. Set Start/Stop value to same number if you only want one run w/o sweeping.
+Tshed_F = 130 #F
+step = 7 #F
+TShed_DBF = np.arange(7, 7 + step, step) # Sweep Shed-type deadband. Set Start/Stop value to same number if you only want one run w/o sweeping.
 
 Tloadup_F = Tset #F
-Tloadup_DBF = 2 #F
+Tloadup_DBF = 7 #F
 
 TbaselineF = Tset #F
 Tbaseline_DBF = 7 #F

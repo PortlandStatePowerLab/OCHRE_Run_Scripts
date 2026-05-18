@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Integrated OCHRE Efficiency Sweep
-Levels 1-9 across specified Deadbands
-"""
-
 import os
 import shutil
 import datetime as dt
@@ -25,7 +19,7 @@ start_time = time.time()
 #########################################
 # USER SETTINGS
 #########################################
-filename_base = '180113_1_3_EffSweep' # date that's thrown away, num of simulation days, data res, filename identifier
+filename_base = '180113_1_3_Efficiency' # date that's thrown away, num of simulation days, data res, filename identifier
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -38,13 +32,12 @@ WEATHER_FILE = os.path.join(WEATHER_DIR, "USA_OR_Portland.Intl.AP.726980_TMY3.ep
 # Simulation parameters
 Start = dt.datetime(2018, 1, 13, 0, 0)
 Duration = 2  # days
-t_res = 3     # minutes
+t_res = 3      # minutes
 jitter_min = 5
 
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 130
 step = 7
-
 
 Tcontrol_dbF = np.arange(7, 7 + step, step) 
 Tcontrol_LOADF = 130
@@ -67,7 +60,9 @@ my_schedule = {
 
 # Efficiency Map
 #LVL = {1:0, 2:0.14, 3:0.29, 4:0.43, 5:0.57, 6:0.71, 7:0.857, 8:1, 9:10} # linear db width
-LVL = {1:0, 3:0.34, 4:0.6, 5:0.88, 6:1.01, 7:1.05, 8:1.35, 9:10} # linear marginal load 
+#LVL = {1:0, 3:0.34, 4:0.6, 5:0.88, 6:1.01, 7:1.05, 8:1.35, 9:10} # davids linear marginal load 
+LVL = {1:0, 3:0.08, 4:0.16, 5:0.26, 6:0.39, 7:0.64, 8:1.09, 9:10} # danas linear marginal load
+
 
 # Initializing efficiency levels
 EFF_BASELINE = 0
@@ -97,7 +92,18 @@ TbaselineC = f_to_c(TbaselineF)
 TdeadbandC = f_to_c_DB(TdeadbandF)
 TinitC = f_to_c(Tinit)
 
-def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, **kwargs):
+def determine_hpwh_control(sim_time, current_temp_c, sched_cfg, shed_deadbandC, is_day_one=False, **kwargs):
+    # If Day 1, force standard unmanaged baseline control with 0 efficiency coefficient
+    if is_day_one:
+        return {
+            'Water Heating': {
+                'Setpoint': TbaselineC,
+                'Deadband': TdeadbandC,
+                'Load Fraction': 1,
+                'Efficiency Coefficient': 0,
+            }
+        }
+
     ctrl_signal = {
         'Water Heating': {
             'Setpoint': TbaselineC,
@@ -202,11 +208,10 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     hpwh_unit = sim_dwelling.get_equipment_by_end_use('Water Heating')
     
     for sim_time in sim_dwelling.sim_times:
-        if sim_time < Start + pd.Timedelta(days=1):
-            control_cmd = {'Water Heating': {'Setpoint': TbaselineC, 'Deadband': TdeadbandC, 'Load Fraction': 1}}
-        else:
-            current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
-            control_cmd = determine_hpwh_control(sim_time, current_setpt, schedule_cfg, shed_deadbandC)
+        is_day_one = sim_time < Start + pd.Timedelta(days=1)
+        
+        current_setpt = hpwh_unit.schedule.loc[sim_time, 'Water Heating Setpoint (C)']
+        control_cmd = determine_hpwh_control(sim_time, current_setpt, schedule_cfg, shed_deadbandC, is_day_one=is_day_one)
         
         sim_dwelling.update(control_signal=control_cmd)
         
@@ -229,6 +234,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
 
 
 def aggregate_across_deadbands(work_dir, prefix):
+    # MATCHES INTERMEDIATE DEAD-BANDS: Looks for the "EfficiencyLevel" suffix on the raw files
     pattern = re.compile(rf"^EfficiencyLevel{re.escape(prefix)}_DB(\d+)_LinearMarginal\.parquet$")
     
     matches = []
@@ -246,7 +252,8 @@ def aggregate_across_deadbands(work_dir, prefix):
     dfs = [pd.read_parquet(os.path.join(work_dir, f)) for f, db in sorted_matches]
     df_master = pd.concat(dfs, ignore_index=True)
     
-    out_path = os.path.join(work_dir, f"EfficiencyLevel{prefix}_FULL_LEVEL.parquet")
+    # OUTPUTS CLEAN MASTER PARQUET: Named exactly like '180113_1_3_EffSweep_L1_FULL_LEVEL.parquet'
+    out_path = os.path.join(work_dir, f"{prefix}_FULL_LEVEL.parquet")
     df_master.to_parquet(out_path, index=False)
     print(f"✅ Aggregated Level {prefix} to {out_path}")
 
@@ -308,7 +315,19 @@ if __name__ == "__main__":
     for current_lvl in sorted(LVL.keys()):
         print(f"\n>>> LEVEL {current_lvl} (Coeff: {LVL[current_lvl]})")
         
+        
+        """
+        Dana says:
+            
+            We can hardcode efficiency levels here, so that baseline, load up are one level
+            and we can sweep through shed efficiency levels, for example.
+        
+        
+        """
+        
         EFF_BASELINE = EFF_SHED = EFF_LOAD = LVL[current_lvl]
+        
+
         lvl_prefix = f"{filename_base}_L{current_lvl}"
 
         # Sweep Deadbands
@@ -325,6 +344,8 @@ if __name__ == "__main__":
             
             if all_results:
                 df_lvl_db = pd.concat(all_results, ignore_index=True)
+                
+                # Saves intermediate tracking files as EfficiencyLevel180113_... to avoid script errors
                 out_name = os.path.join(WORKING_DIR, f"EfficiencyLevel{lvl_prefix}_DB{shed_dbF}_LinearMarginal.parquet")
                 df_lvl_db.to_parquet(out_name, index=False)
 
