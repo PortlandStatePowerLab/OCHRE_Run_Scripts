@@ -25,7 +25,7 @@ start_time = time.time()
 #########################################
 # USER SETTINGS
 #########################################
-filename_base = '180113_1_3_EffSweep' 
+filename_base = '180113_1_3_EffSweep' # date that's thrown away, num of simulation days, data res, filename identifier
 
 # Paths
 DEFAULT_INPUT = r"C:\Users\danap\anaconda3\Lib\site-packages\ochre\defaults\Input Files"
@@ -44,6 +44,8 @@ jitter_min = 5
 # HPWH control parameters (°F)
 Tcontrol_SHEDF = 130
 step = 7
+
+
 Tcontrol_dbF = np.arange(7, 7 + step, step) 
 Tcontrol_LOADF = 130
 Tcontrol_LOADdeadbandF = 7
@@ -64,10 +66,10 @@ my_schedule = {
 }
 
 # Efficiency Map
-# LVL = {1:0, 2:0.14, 3:0.29, 4:0.43, 5:0.57, 6:0.71, 7:0.857, 8:1, 9:10} # linear db width
-LVL = {1:0, 3:0.34, 4:0.6, 5:0.88, 6:1.02, 7:1.05, 8:1.35, 9:10} # linear marginal load 
+#LVL = {1:0, 2:0.14, 3:0.29, 4:0.43, 5:0.57, 6:0.71, 7:0.857, 8:1, 9:10} # linear db width
+LVL = {1:0, 3:0.34, 4:0.6, 5:0.88, 6:1.01, 7:1.05, 8:1.35, 9:10} # linear marginal load 
 
-# Global Placeholders
+# Initializing efficiency levels
 EFF_BASELINE = 0
 EFF_SHED = 0
 EFF_LOAD = 0
@@ -162,6 +164,10 @@ def find_all_homes(base_dir):
                 homes.append(home_path)
     return homes
 
+#########################################
+# UTILITIES & SIMULATION FUNCTIONS
+#########################################
+
 def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     shed_deadbandC = f_to_c_DB(shed_deadbandF)
     filtered_sched_file = filter_schedules(home_path)
@@ -174,7 +180,7 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         "hpxml_file": hpxml_file,
         "hpxml_schedule_file": filtered_sched_file,
         "weather_file": weather_file_path,
-        "verbosity": 1,
+        "verbosity": 7,
         "Equipment": {
             "Water Heating": {
                 "Initial Temperature (C)": TinitC, 
@@ -187,7 +193,6 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
         }
     }
 
-    # Catching generic Exception covers internal XML formatting issues (like missing Pool Pumps)
     try:
         sim_dwelling = Dwelling(name="HPWH Controlled", **dwelling_args_local)
     except Exception as e:
@@ -210,11 +215,20 @@ def simulate_home(home_path, weather_file_path, schedule_cfg, shed_deadbandF):
     df_ctrl["Shed Deadband (F)"] = shed_deadbandF
     df_ctrl["Home"] = os.path.basename(home_path)
 
-    cols_to_keep = ["Time", "Home", "Total Electric Power (kW)", "Water Heating Electric Power (kW)", "Shed Deadband (F)"]
+    # --- FIX: Dynamic column extraction for water heating variants ---
+    df_cols = df_ctrl.columns.tolist()
+    wh_power_col = [c for c in df_cols if ("Water Heat" in c or "Water Heater" in c) and "Power" in c]
+
+    cols_to_keep = ["Time", "Home", "Total Electric Power (kW)", "Shed Deadband (F)"]
+    if wh_power_col:
+        cols_to_keep.append(wh_power_col[0])  # Handles whatever exact variant name OCHRE assigns
+    else:
+        print(f"⚠️ Warning: No water heating power column found for {os.path.basename(home_path)}!")
+
     return df_ctrl[[c for c in cols_to_keep if c in df_ctrl.columns]]
 
+
 def aggregate_across_deadbands(work_dir, prefix):
-    # Regex updated to explicitly match the pattern outputted by our loops below
     pattern = re.compile(rf"^EfficiencyLevel{re.escape(prefix)}_DB(\d+)_LinearMarginal\.parquet$")
     
     matches = []
@@ -228,12 +242,23 @@ def aggregate_across_deadbands(work_dir, prefix):
         return
 
     # Sort files sequentially by deadband value
-    dfs = [pd.read_parquet(os.path.join(work_dir, f)) for f, db in sorted(matches, key=lambda x: x[1])]
+    sorted_matches = sorted(matches, key=lambda x: x[1])
+    dfs = [pd.read_parquet(os.path.join(work_dir, f)) for f, db in sorted_matches]
     df_master = pd.concat(dfs, ignore_index=True)
     
     out_path = os.path.join(work_dir, f"EfficiencyLevel{prefix}_FULL_LEVEL.parquet")
     df_master.to_parquet(out_path, index=False)
     print(f"✅ Aggregated Level {prefix} to {out_path}")
+
+    # --- CLEANUP: Safe deletion of intermediate deadband parquets ---
+    print(f"🧹 Cleaning up intermediate deadband files for {prefix}...")
+    for f, _ in sorted_matches:
+        file_to_delete = os.path.join(work_dir, f)
+        try:
+            os.remove(file_to_delete)
+        except Exception as e:
+            print(f"⚠️ Could not delete intermediate file {f}: {e}")
+
 
 #########################################
 # MAIN EXECUTION
@@ -245,19 +270,23 @@ if __name__ == "__main__":
 
     for item in os.listdir(DEFAULT_INPUT):
         src, dst = os.path.join(DEFAULT_INPUT, item), os.path.join(INPUT_DIR, item)
-        if os.path.isdir(src) and not os.path.exists(dst): shutil.copytree(src, dst)
-    if not os.path.exists(WEATHER_FILE): shutil.copy(DEFAULT_WEATHER, WEATHER_FILE)
+        if os.path.isdir(src) and not os.path.exists(dst): 
+            shutil.copytree(src, dst)
+    if not os.path.exists(WEATHER_FILE): 
+        shutil.copy(DEFAULT_WEATHER, WEATHER_FILE)
 
     homes = find_all_homes(INPUT_DIR)
     
     home_schedules = {}
     fmt = "%H:%M"
     
+    # Generate weighted randomization pool for timing blocks
     M_LU_weighted_pool = [b for b, w in zip(M_LU_bins, M_LU_weights) for _ in range(w)]
     E_ALU_weighted_pool = [b for b, w in zip(E_ALU_bins, E_ALU_weights) for _ in range(w)]
     random.shuffle(M_LU_weighted_pool)
     random.shuffle(E_ALU_weighted_pool)
 
+    # Process and build jittered configurations for each home asset
     for home in homes:
         sched = my_schedule.copy()
         t_base = pd.to_datetime(M_LU_weighted_pool.pop() if M_LU_weighted_pool else random.choice(M_LU_bins), format=fmt)
@@ -275,30 +304,31 @@ if __name__ == "__main__":
         sched['E_ALU_time'] = (t_e_alu_base + pd.Timedelta(minutes=random.uniform(-jitter_min, jitter_min))).strftime(fmt)
         home_schedules[home] = sched
 
-    # 3. SWEEP LEVELS 1-9
+    # Sweep Levels
     for current_lvl in sorted(LVL.keys()):
         print(f"\n>>> LEVEL {current_lvl} (Coeff: {LVL[current_lvl]})")
         
         EFF_BASELINE = EFF_SHED = EFF_LOAD = LVL[current_lvl]
         lvl_prefix = f"{filename_base}_L{current_lvl}"
 
-        # 4. SWEEP DEADBANDS
+        # Sweep Deadbands
         for shed_dbF in Tcontrol_dbF:
             all_results = []
+            print(f"   ↳ Simulating Deadband: {shed_dbF}°F")
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 futures = [executor.submit(simulate_home, h, WEATHER_FILE, home_schedules[h], shed_dbF) for h in homes]
                 for f in concurrent.futures.as_completed(futures):
                     res = f.result()
-                    if res is not None: all_results.append(res)
+                    if res is not None: 
+                        all_results.append(res)
             
             if all_results:
                 df_lvl_db = pd.concat(all_results, ignore_index=True)
-                # Modified naming convention here to distinctively match the deadband number
                 out_name = os.path.join(WORKING_DIR, f"EfficiencyLevel{lvl_prefix}_DB{shed_dbF}_LinearMarginal.parquet")
                 df_lvl_db.to_parquet(out_name, index=False)
 
-        # 5. Aggregate Level
+        # Aggregate Level and execute intermediate file cleaning pipeline
         aggregate_across_deadbands(WORKING_DIR, lvl_prefix)
 
     print(f"\n✅ COMPLETE. Total time: {(time.time() - start_time)/60:.2f} min")
