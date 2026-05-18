@@ -40,12 +40,15 @@
         - Upper temperature threshold: Tset
         - Lower temperature threshold: Tset - Tset_DB * efficiency_coefficient
     - As the _efficiency coefficient_ increases, the HP operating deadband widens, making the unit more efficient.
+    - Embedded is a sweep through _Shed_ deadbands, as well. 
+    - Each _Efficiency Level_ run will iterate through all _Shed_ deadbands and then aggregate deadband list into one master _Efficiency Level_ parquet file. 
+    - The current script iterates through all _Efficiency Levels_
 
 6. C10_Reserve.py
     - A _Reserve_ service can be simulated by asking a small percentage of aggregated loads to anticipate...the unaticipated! 
     - Most loads will run as normal for the full simulation period. 
     - Some loads will consume (_Load Up, ALU_) during a midday, hypothetical, overgeneration scenario. 
-    - This code needs work to better coordinate...
+    - This code needs work to better coordinate participating loads as specific call times...
 
 ### ADMD scripts (Joe), Results plotter (Dana)
 
@@ -63,9 +66,9 @@ These scripts are used to run a Monte Carlo Simulation for any aggregated load C
 3. The resultant file can be used in any of the D2/D3 files for plotting the results. Plotting files could use some work to make data input less hardcode-y.
 
 
-### Plotting scripts (Dana)
+### Plotting jupyter notebooks (Dana)
 
-These are some plotting scripts I used to make figures for reports/thesis. 
+These are some plotting jupyter notebooks I used to make figures for reports/thesis. 
 
 1. X1_PlotAggregated
 2. X2_PlotViolin
